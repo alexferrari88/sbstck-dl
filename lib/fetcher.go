@@ -7,10 +7,10 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
-	"sync"
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
+	"golang.org/x/sync/errgroup"
 	"golang.org/x/time/rate"
 )
 
@@ -46,26 +46,39 @@ func NewFetcher(ratePerSecond int, proxyURL *url.URL) *Fetcher {
 
 	return &Fetcher{
 		Client:      client,
-		RateLimiter: rate.NewLimiter(rate.Limit(ratePerSecond), 1),
+		RateLimiter: rate.NewLimiter(rate.Limit(ratePerSecond), 1), // 1 burst means that we can send 1 request at a time (limited to ratePerSecond)
 	}
 }
 
 func (f *Fetcher) FetchURLs(ctx context.Context, urls []string) <-chan FetchResult {
 	results := make(chan FetchResult, len(urls))
+	ctx, cancel := context.WithCancel(ctx)
+	var eg errgroup.Group
+
+	sem := make(chan struct{}, f.RateLimiter.Burst()) // worker pool
+
+	for _, u := range urls {
+		u := u // https://golang.org/doc/faq#closures_and_goroutines
+		eg.Go(func() error {
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			body, err := f.FetchURL(ctx, u)
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+				results <- FetchResult{Url: u, Body: body, Error: err}
+				if err != nil {
+					cancel()
+				}
+				return nil
+			}
+		})
+	}
 
 	go func() {
-		var wg sync.WaitGroup
-		wg.Add(len(urls))
-
-		for _, u := range urls {
-			go func(url string) {
-				defer wg.Done()
-				body, err := f.FetchURL(ctx, url)
-				results <- FetchResult{Url: url, Body: body, Error: err}
-			}(u)
-		}
-
-		wg.Wait()
+		eg.Wait()
+		cancel()
 		close(results)
 	}()
 
@@ -77,23 +90,20 @@ func (f *Fetcher) FetchURL(ctx context.Context, url string) (io.ReadCloser, erro
 	backOffCfg.MaxElapsedTime = 1 * time.Minute
 
 	var body io.ReadCloser
+	var err error
 
-	err := backoff.Retry(func() error {
-		err := f.RateLimiter.Wait(ctx) // Use rate limiter
+	backoff.RetryNotify(func() error {
+		err = f.RateLimiter.Wait(ctx) // Use rate limiter
 		if err != nil {
 			return err // Could be a context cancellation or error in limiter
 		}
 		body, err = f.fetch(ctx, url)
-		if err != nil {
-			if respErr, ok := err.(*FetchError); ok && respErr.TooManyRequests {
-				retryAfter := respErr.RetryAfter
-				if retryAfter > 0 {
-					time.Sleep(time.Duration(retryAfter) * time.Second)
-				}
-			}
-		}
 		return err
-	}, backOffCfg)
+	}, backOffCfg, func(err error, d time.Duration) {
+		if respErr, ok := err.(*FetchError); ok && respErr.TooManyRequests {
+			backOffCfg.MaxInterval = time.Duration(respErr.RetryAfter) * time.Second
+		}
+	})
 
 	return body, err
 }
