@@ -1,8 +1,8 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
+	"log"
 	"net/url"
 	"strings"
 	"time"
@@ -14,30 +14,16 @@ import (
 
 // downloadCmd represents the download command
 var (
-	downloadUrl   string
-	format        string
-	outputFolder  string
-	verbose       bool
-	dryRun        bool
-	ratePerSecond int
-	proxyURL      string
-	downloadCmd   = &cobra.Command{
+	downloadUrl  string
+	format       string
+	outputFolder string
+	dryRun       bool
+	downloadCmd  = &cobra.Command{
 		Use:   "download",
 		Short: "Download individual posts or the entire public archive",
 		Long:  `You can provide the url of a single post or the main url of the Substack you want to download.`,
 		Run: func(cmd *cobra.Command, args []string) {
 			startTime := time.Now()
-			ctx := context.Background()
-			var parsedProxyURL *url.URL
-			if proxyURL != "" {
-				var err error
-				parsedProxyURL, err = validateURL(proxyURL)
-				if err != nil {
-					panic(err)
-				}
-			}
-			fetcher := lib.NewFetcher(ratePerSecond, parsedProxyURL)
-			extractor := lib.NewExtractor(fetcher)
 
 			// if url contains "/p/", we are downloading a single post
 			if strings.Contains(downloadUrl, "/p/") {
@@ -48,22 +34,23 @@ var (
 					fmt.Println("Dry run, exiting...")
 					return
 				}
+
 				post, err := extractor.ExtractPost(ctx, downloadUrl)
 				if err != nil {
-					panic(err)
+					log.Fatal(err)
 				}
 				downloadTime := time.Since(startTime)
 				if verbose {
 					fmt.Printf("Downloaded post %s in %s\n", downloadUrl, downloadTime)
 				}
-				// write post to file in the outputFolder
-				// the file name should be the post slug
-				// the file format should be the one specified in the format flag
-				path := fmt.Sprintf("%s/%s_%s.%s", outputFolder, convertDateTime(post.PostDate), post.Slug, format)
+
+				path := makePath(post, outputFolder, format)
 				if verbose {
 					fmt.Printf("Writing post to file %s\n", path)
 				}
+
 				post.WriteToFile(path, format)
+
 				if verbose {
 					fmt.Println("Done in ", time.Since(startTime))
 				}
@@ -71,7 +58,7 @@ var (
 				// we are downloading the entire archive
 				urls, err := extractor.GetAllPostsURLs(ctx, downloadUrl)
 				if err != nil {
-					panic(err)
+					log.Fatal(err)
 				}
 				if verbose {
 					fmt.Printf("Found %d posts\n", len(urls))
@@ -87,20 +74,19 @@ var (
 					progressbar.OptionShowBytes(true))
 				for result := range extractor.ExtractAllPosts(ctx, urls) {
 					if result.Err != nil {
-						panic(result.Err)
+						log.Fatal(result.Err)
 					}
 					bar.Add(1)
 					if verbose {
 						fmt.Printf("Downloading post %s\n", result.Post.CanonicalUrl)
 					}
 					post := result.Post
-					// write post to file in the outputFolder
-					// the file name should be the post slug
-					// the file format should be the one specified in the format flag
-					path := fmt.Sprintf("%s/%s_%s.%s", outputFolder, post.PostDate, post.Slug, format)
+
+					path := makePath(post, outputFolder, format)
 					if verbose {
 						fmt.Printf("Writing post to file %s\n", path)
 					}
+
 					post.WriteToFile(path, format)
 				}
 				if verbose {
@@ -116,10 +102,7 @@ func init() {
 	downloadCmd.PersistentFlags().StringVarP(&downloadUrl, "url", "u", "", "Specify the Substack url")
 	downloadCmd.PersistentFlags().StringVarP(&format, "format", "f", "html", "Specify the output format (options: \"html\", \"md\", \"txt\"")
 	downloadCmd.PersistentFlags().StringVarP(&outputFolder, "path", "p", ".", "Specify the download directory")
-	downloadCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose output")
 	downloadCmd.PersistentFlags().BoolVarP(&dryRun, "dry-run", "d", false, "Enable dry run")
-	downloadCmd.PersistentFlags().IntVarP(&ratePerSecond, "rate", "r", 10, "Specify the rate of requests per second")
-	downloadCmd.PersistentFlags().StringVarP(&proxyURL, "proxy", "x", "", "Specify the proxy url")
 	downloadCmd.MarkPersistentFlagRequired("url")
 
 	// Here you will define your flags and configuration settings.
@@ -161,4 +144,8 @@ func validateURL(toTest string) (*url.URL, error) {
 	}
 
 	return u, err
+}
+
+func makePath(post lib.Post, outputFolder string, format string) string {
+	return fmt.Sprintf("%s/%s_%s.%s", outputFolder, convertDateTime(post.PostDate), post.Slug, format)
 }
