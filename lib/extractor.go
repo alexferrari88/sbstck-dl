@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -80,6 +81,10 @@ func (p *Post) ToJSON() (string, error) {
 }
 
 func (p *Post) WriteToFile(path string, format string) error {
+	err := os.MkdirAll(filepath.Dir(path), 0755)
+	if err != nil {
+		return err
+	}
 	f, err := os.Create(path)
 	if err != nil {
 		return err
@@ -197,15 +202,7 @@ type ExtractResult struct {
 	Err  error
 }
 
-func (e *Extractor) ExtractAllPosts(ctx context.Context, pubUrl string) <-chan ExtractResult {
-	urls, err := e.GetAllPostsURLs(ctx, pubUrl)
-	if err != nil {
-		ch := make(chan ExtractResult, 1)
-		ch <- ExtractResult{Err: err}
-		close(ch)
-		return ch
-	}
-
+func (e *Extractor) ExtractAllPosts(ctx context.Context, urls []string) <-chan ExtractResult {
 	ch := make(chan ExtractResult, len(urls))
 
 	go func() {
