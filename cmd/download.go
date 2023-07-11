@@ -3,10 +3,12 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
 	"github.com/alexferrari88/sbstck-dl/lib"
+	"github.com/schollz/progressbar/v3"
 	"github.com/spf13/cobra"
 )
 
@@ -79,9 +81,15 @@ var (
 					fmt.Println("Dry run, exiting...")
 					return
 				}
+				bar := progressbar.NewOptions(len(urls),
+					progressbar.OptionSetWidth(25),
+					progressbar.OptionSetDescription("downloading"),
+					progressbar.OptionShowBytes(true))
+				for result := range extractor.ExtractAllPosts(ctx, urls) {
 					if result.Err != nil {
 						panic(result.Err)
 					}
+					bar.Add(1)
 					if verbose {
 						fmt.Printf("Downloading post %s\n", result.Post.CanonicalUrl)
 					}
