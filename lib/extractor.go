@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 
@@ -68,6 +69,44 @@ func (p *Post) ToHTML(withTitle bool) string {
 		return fmt.Sprintf("<h1>%s</h1>\n\n%s", p.Title, p.BodyHTML)
 	}
 	return p.BodyHTML
+}
+
+func (p *Post) ToJSON() (string, error) {
+	b, err := json.Marshal(p)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
+func (p *Post) WriteToFile(path string, format string) error {
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	var content string
+	switch format {
+	case "html":
+		content = p.ToHTML(true)
+	case "md":
+		content, err = p.ToMD(true)
+		if err != nil {
+			panic(err)
+		}
+	case "txt":
+		content = p.ToText(true)
+	default:
+		return fmt.Errorf("unknown format: %s", format)
+	}
+	_, err = f.WriteString(content)
+	if err != nil {
+		panic(err)
+	}
+
+	f.Sync()
+
+	return nil
 }
 
 type PostWrapper struct {
