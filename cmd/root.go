@@ -35,7 +35,7 @@ var (
 func Execute() {
 	if proxyURL != "" {
 		var err error
-		parsedProxyURL, err = validateURL(proxyURL)
+		parsedProxyURL, err = parseURL(proxyURL)
 		if err != nil {
 			log.Fatal(err)
 		}

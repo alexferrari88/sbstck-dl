@@ -132,7 +132,7 @@ func convertDateTime(datetime string) string {
 	return formattedDateTime
 }
 
-func validateURL(toTest string) (*url.URL, error) {
+func parseURL(toTest string) (*url.URL, error) {
 	_, err := url.ParseRequestURI(toTest)
 	if err != nil {
 		return nil, err
