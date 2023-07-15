@@ -11,6 +11,7 @@ import (
 )
 
 // rootCmd represents the base command when called without any subcommands
+
 var (
 	proxyURL       string
 	verbose        bool
@@ -40,6 +41,9 @@ func Execute() {
 			log.Fatal(err)
 		}
 	}
+	if ratePerSecond == 0 {
+		log.Fatal("rate must be greater than 0")
+	}
 	fetcher = lib.NewFetcher(ratePerSecond, parsedProxyURL)
 	extractor = lib.NewExtractor(fetcher)
 	err := rootCmd.Execute()
@@ -59,5 +63,5 @@ func init() {
 	// when this action is called directly.
 	rootCmd.PersistentFlags().StringVarP(&proxyURL, "proxy", "x", "", "Specify the proxy url")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose output")
-	rootCmd.PersistentFlags().IntVarP(&ratePerSecond, "rate", "r", 10, "Specify the rate of requests per second")
+	rootCmd.PersistentFlags().IntVarP(&ratePerSecond, "rate", "r", lib.DefaultRatePerSecond, "Specify the rate of requests per second")
 }

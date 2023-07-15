@@ -10,11 +10,7 @@
       "request": "launch",
       "mode": "auto",
       "program": "${workspaceFolder}/main.go",
-      "args": [
-        "download",
-        "-u",
-        "https://www.recomendo.com/p/public-domain-reviewridwellwetnfix"
-      ]
+      "args": ["download", "-u", "https://www.recomendo.com", "-o", "recomendo"]
     }
   ]
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -12,6 +13,12 @@ import (
 	"github.com/cenkalti/backoff/v4"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/time/rate"
+)
+
+const (
+	DefaultRatePerSecond = 2
+	defaultRetryAfter    = 60
+	defaultMaxRetryCount = 5
 )
 
 type Fetcher struct {
@@ -36,7 +43,7 @@ func (e *FetchError) Error() string {
 
 func NewFetcher(ratePerSecond int, proxyURL *url.URL) *Fetcher {
 	if ratePerSecond == 0 {
-		ratePerSecond = 10
+		ratePerSecond = DefaultRatePerSecond
 	}
 	trasport := http.DefaultTransport
 	if proxyURL != nil {
@@ -52,7 +59,7 @@ func NewFetcher(ratePerSecond int, proxyURL *url.URL) *Fetcher {
 
 func (f *Fetcher) FetchURLs(ctx context.Context, urls []string) <-chan FetchResult {
 	results := make(chan FetchResult, len(urls))
-	ctx, cancel := context.WithCancel(ctx)
+	ctx, _ = context.WithCancel(ctx)
 	var eg errgroup.Group
 
 	sem := make(chan struct{}, f.RateLimiter.Burst()) // worker pool
@@ -69,7 +76,7 @@ func (f *Fetcher) FetchURLs(ctx context.Context, urls []string) <-chan FetchResu
 			default:
 				results <- FetchResult{Url: u, Body: body, Error: err}
 				if err != nil {
-					cancel()
+					log.Printf("Error fetching url %s: %v\n", u, err)
 				}
 				return nil
 			}
@@ -78,7 +85,6 @@ func (f *Fetcher) FetchURLs(ctx context.Context, urls []string) <-chan FetchResu
 
 	go func() {
 		eg.Wait()
-		cancel()
 		close(results)
 	}()
 
@@ -87,21 +93,39 @@ func (f *Fetcher) FetchURLs(ctx context.Context, urls []string) <-chan FetchResu
 
 func (f *Fetcher) FetchURL(ctx context.Context, url string) (io.ReadCloser, error) {
 	backOffCfg := backoff.NewExponentialBackOff()
-	backOffCfg.MaxElapsedTime = 1 * time.Minute
+	backOffCfg.MaxElapsedTime = 2 * time.Minute
+	backOffCfg.MaxInterval = 30 * time.Second // Increase max interval
+	backOffCfg.Multiplier = 2.0               // Increase backoff multiplier
 
 	var body io.ReadCloser
 	var err error
+	var retryCounter int
+	var nextRetryWait time.Duration
 
 	backoff.RetryNotify(func() error {
+		if retryCounter >= defaultMaxRetryCount { // Increase max retry count
+			err = fmt.Errorf("max retry count reached for URL: %s", url)
+			return nil
+		}
+		if nextRetryWait > 0 {
+			time.Sleep(nextRetryWait)
+		}
 		err = f.RateLimiter.Wait(ctx) // Use rate limiter
 		if err != nil {
 			return err // Could be a context cancellation or error in limiter
 		}
 		body, err = f.fetch(ctx, url)
+		if err != nil {
+			fmt.Printf("Error fetching url %s: %v\n", url, err) // Log error
+			retryCounter++
+		}
 		return err
 	}, backOffCfg, func(err error, d time.Duration) {
 		if respErr, ok := err.(*FetchError); ok && respErr.TooManyRequests {
-			backOffCfg.MaxInterval = time.Duration(respErr.RetryAfter) * time.Second
+			nextRetryWait = time.Duration(respErr.RetryAfter) * time.Second
+			if retryCounter > 0 {
+				nextRetryWait *= time.Duration(retryCounter)
+			}
 		}
 	})
 
@@ -120,7 +144,7 @@ func (f *Fetcher) fetch(ctx context.Context, url string) (io.ReadCloser, error) 
 	}
 
 	if res.StatusCode == http.StatusTooManyRequests {
-		retryAfter := 0
+		retryAfter := defaultRetryAfter
 		if retryAfterStr := res.Header.Get("Retry-After"); retryAfterStr != "" {
 			retryAfter, err = strconv.Atoi(retryAfterStr)
 			if err != nil {

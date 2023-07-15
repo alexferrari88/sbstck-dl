@@ -28,7 +28,7 @@ var listCmd = &cobra.Command{
 			log.Fatal(err)
 		}
 		if verbose {
-			fmt.Printf("Found %d posts\n", len(urls))
+			fmt.Printf("Found %d posts.\n", len(urls))
 		}
 		for _, url := range urls {
 			fmt.Println(url)
