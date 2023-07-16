@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -75,9 +74,6 @@ func (f *Fetcher) FetchURLs(ctx context.Context, urls []string) <-chan FetchResu
 				return ctx.Err()
 			default:
 				results <- FetchResult{Url: u, Body: body, Error: err}
-				if err != nil {
-					log.Printf("Error fetching url %s: %v\n", u, err)
-				}
 				return nil
 			}
 		})
@@ -116,7 +112,6 @@ func (f *Fetcher) FetchURL(ctx context.Context, url string) (io.ReadCloser, erro
 		}
 		body, err = f.fetch(ctx, url)
 		if err != nil {
-			fmt.Printf("Error fetching url %s: %v\n", url, err) // Log error
 			retryCounter++
 		}
 		return err
