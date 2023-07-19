@@ -198,7 +198,9 @@ func (e *Extractor) ExtractPost(ctx context.Context, pageUrl string) (Post, erro
 	return p, nil
 }
 
-func (e *Extractor) GetAllPostsURLs(ctx context.Context, pubUrl string) ([]string, error) {
+type DateFilterFunc func(string) bool
+
+func (e *Extractor) GetAllPostsURLs(ctx context.Context, pubUrl string, f DateFilterFunc) ([]string, error) {
 	u, err := url.Parse(pubUrl)
 	if err != nil {
 		return nil, err
@@ -223,17 +225,25 @@ func (e *Extractor) GetAllPostsURLs(ctx context.Context, pubUrl string) ([]strin
 	}
 
 	urls := []string{}
-	doc.Find("loc").EachWithBreak(func(i int, s *goquery.Selection) bool {
+	doc.Find("url").EachWithBreak(func(i int, s *goquery.Selection) bool {
 		// Check if the context has been cancelled
 		select {
 		case <-ctx.Done():
 			return false
 		default:
 		}
-		url := s.Text()
-		if strings.Contains(url, "/p/") {
-			urls = append(urls, url)
+		urlSel := s.Find("loc")
+		lastmodSel := s.Find("lastmod")
+		url := urlSel.Text()
+		lastmod := lastmodSel.Text()
+		if !strings.Contains(url, "/p/") {
+			return true
 		}
+		// if the date filter function is not nil, check if the post date complies with the filter
+		if f != nil && !f(lastmod) {
+			return true
+		}
+		urls = append(urls, url)
 
 		return true
 	})

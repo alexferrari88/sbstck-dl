@@ -17,7 +17,7 @@ import (
 const (
 	DefaultRatePerSecond = 2
 	defaultRetryAfter    = 60
-	defaultMaxRetryCount = 5
+	defaultMaxRetryCount = 20
 )
 
 type Fetcher struct {
@@ -89,17 +89,17 @@ func (f *Fetcher) FetchURLs(ctx context.Context, urls []string) <-chan FetchResu
 
 func (f *Fetcher) FetchURL(ctx context.Context, url string) (io.ReadCloser, error) {
 	backOffCfg := backoff.NewExponentialBackOff()
-	backOffCfg.MaxElapsedTime = 2 * time.Minute
-	backOffCfg.MaxInterval = 30 * time.Second // Increase max interval
-	backOffCfg.Multiplier = 2.0               // Increase backoff multiplier
+	backOffCfg.MaxElapsedTime = 3 * time.Minute
+	backOffCfg.MaxInterval = 60 * time.Second
+	backOffCfg.Multiplier = 2.0
 
 	var body io.ReadCloser
 	var err error
 	var retryCounter int
 	var nextRetryWait time.Duration
 
-	backoff.RetryNotify(func() error {
-		if retryCounter >= defaultMaxRetryCount { // Increase max retry count
+	operation := func() error {
+		if retryCounter >= defaultMaxRetryCount {
 			err = fmt.Errorf("max retry count reached for URL: %s", url)
 			return nil
 		}
@@ -115,14 +115,18 @@ func (f *Fetcher) FetchURL(ctx context.Context, url string) (io.ReadCloser, erro
 			retryCounter++
 		}
 		return err
-	}, backOffCfg, func(err error, d time.Duration) {
+	}
+
+	notify := func(err error, d time.Duration) {
 		if respErr, ok := err.(*FetchError); ok && respErr.TooManyRequests {
 			nextRetryWait = time.Duration(respErr.RetryAfter) * time.Second
 			if retryCounter > 0 {
 				nextRetryWait *= time.Duration(retryCounter)
 			}
 		}
-	})
+	}
+
+	backoff.RetryNotify(operation, backOffCfg, notify)
 
 	return body, err
 }

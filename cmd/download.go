@@ -34,10 +34,13 @@ var (
 					fmt.Println("Dry run, exiting...")
 					return
 				}
+				if (beforeDate != "" || afterDate != "") && verbose {
+					fmt.Println("Warning: --before and --after flags are ignored when downloading a single post")
+				}
 
 				post, err := extractor.ExtractPost(ctx, downloadUrl)
 				if err != nil {
-					log.Fatal(err)
+					log.Fatalln(err)
 				}
 				downloadTime := time.Since(startTime)
 				if verbose {
@@ -56,9 +59,11 @@ var (
 				}
 			} else {
 				// we are downloading the entire archive
-				urls, err := extractor.GetAllPostsURLs(ctx, downloadUrl)
+				var downloadedPostsCount int
+				dateFilterfunc := makeDateFilterFunc(beforeDate, afterDate)
+				urls, err := extractor.GetAllPostsURLs(ctx, downloadUrl, dateFilterfunc)
 				if err != nil {
-					log.Fatal(err)
+					log.Fatalln(err)
 				}
 				if verbose {
 					fmt.Printf("Found %d posts\n", len(urls))
@@ -73,10 +78,20 @@ var (
 					progressbar.OptionSetDescription("downloading"),
 					progressbar.OptionShowBytes(true))
 				for result := range extractor.ExtractAllPosts(ctx, urls) {
+					select {
+					case <-ctx.Done():
+						log.Fatalln("context cancelled")
+					default:
+					}
 					if result.Err != nil {
-						log.Fatal(result.Err)
+						if verbose {
+							fmt.Printf("Error downloading post %s: %s\n", result.Post.CanonicalUrl, result.Err)
+							fmt.Println("Skipping...")
+						}
+						continue
 					}
 					bar.Add(1)
+					downloadedPostsCount++
 					if verbose {
 						fmt.Printf("Downloading post %s\n", result.Post.CanonicalUrl)
 					}
@@ -90,6 +105,7 @@ var (
 					post.WriteToFile(path, format)
 				}
 				if verbose {
+					fmt.Println("Downloaded", downloadedPostsCount, "posts, out of", len(urls))
 					fmt.Println("Done in ", time.Since(startTime))
 				}
 			}

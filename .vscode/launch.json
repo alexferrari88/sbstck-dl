@@ -10,7 +10,13 @@
       "request": "launch",
       "mode": "auto",
       "program": "${workspaceFolder}/main.go",
-      "args": ["download", "-u", "https://www.recomendo.com", "-o", "recomendo"]
+      "args": [
+        "list",
+        "-u",
+        "https://www.recomendo.com",
+        "--before",
+        "2023-04-01"
+      ]
     }
   ]
 }

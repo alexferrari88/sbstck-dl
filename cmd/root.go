@@ -16,6 +16,8 @@ var (
 	proxyURL       string
 	verbose        bool
 	ratePerSecond  int
+	beforeDate     string
+	afterDate      string
 	ctx            = context.Background()
 	parsedProxyURL *url.URL
 	fetcher        *lib.Fetcher
@@ -64,4 +66,24 @@ func init() {
 	rootCmd.PersistentFlags().StringVarP(&proxyURL, "proxy", "x", "", "Specify the proxy url")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose output")
 	rootCmd.PersistentFlags().IntVarP(&ratePerSecond, "rate", "r", lib.DefaultRatePerSecond, "Specify the rate of requests per second")
+	rootCmd.PersistentFlags().StringVar(&beforeDate, "before", "", "Download posts published before this date (format: YYYY-MM-DD)")
+	rootCmd.PersistentFlags().StringVar(&afterDate, "after", "", "Download posts published after this date (format: YYYY-MM-DD)")
+}
+
+func makeDateFilterFunc(beforeDate string, afterDate string) lib.DateFilterFunc {
+	var dateFilterFunc lib.DateFilterFunc
+	if beforeDate != "" && afterDate != "" {
+		dateFilterFunc = func(date string) bool {
+			return date >= afterDate && date <= beforeDate
+		}
+	} else if beforeDate != "" {
+		dateFilterFunc = func(date string) bool {
+			return date <= beforeDate
+		}
+	} else if afterDate != "" {
+		dateFilterFunc = func(date string) bool {
+			return date >= afterDate
+		}
+	}
+	return dateFilterFunc
 }

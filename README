@@ -1,5 +1,25 @@
 # Substack Downloader
 
-So far, the download command works but this is a first draft and still actively being developer.
+Simple CLI tool to download one or all the posts from a Substack blog.
 
-Expect frequent and potentially breaking changes.
+## Installation
+
+```bash
+go install github.com/alexferrari88/sbstck-dl
+```
+
+## Usage
+
+```bash
+
+```
+
+## TODO
+
+- [ ] Implement filtering
+- [ ] Implement loading from config file
+- [ ] Add support for private blogs
+- [ ] Add support for downloading media
+- [ ] Add tests
+- [ ] Add CI
+- [ ] Add documentation
