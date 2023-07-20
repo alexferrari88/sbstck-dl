@@ -15,9 +15,12 @@ import (
 )
 
 const (
-	DefaultRatePerSecond = 2
-	defaultRetryAfter    = 60
-	defaultMaxRetryCount = 20
+	DefaultRatePerSecond  = 2
+	defaultRetryAfter     = 60
+	defaultMaxRetryCount  = 100
+	defaultMaxElapsedTime = 10 * time.Minute
+	defaultMaxInterval    = 2 * time.Minute
+	userAgent             = "sbstck-dl/0.1"
 )
 
 type Fetcher struct {
@@ -89,8 +92,8 @@ func (f *Fetcher) FetchURLs(ctx context.Context, urls []string) <-chan FetchResu
 
 func (f *Fetcher) FetchURL(ctx context.Context, url string) (io.ReadCloser, error) {
 	backOffCfg := backoff.NewExponentialBackOff()
-	backOffCfg.MaxElapsedTime = 3 * time.Minute
-	backOffCfg.MaxInterval = 60 * time.Second
+	backOffCfg.MaxElapsedTime = defaultMaxElapsedTime
+	backOffCfg.MaxInterval = defaultMaxInterval
 	backOffCfg.Multiplier = 2.0
 
 	var body io.ReadCloser
@@ -136,6 +139,7 @@ func (f *Fetcher) fetch(ctx context.Context, url string) (io.ReadCloser, error) 
 	if err != nil {
 		return nil, err
 	}
+	req.Header.Set("User-Agent", userAgent)
 
 	res, err := f.Client.Do(req)
 	if err != nil {

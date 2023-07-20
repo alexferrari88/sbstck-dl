@@ -11,11 +11,11 @@
       "mode": "auto",
       "program": "${workspaceFolder}/main.go",
       "args": [
-        "list",
+        "download",
         "-u",
-        "https://www.recomendo.com",
-        "--before",
-        "2023-04-01"
+        "https://www.recomendo.com/p/stable-doodlemind-windowchimp-empire",
+        "-f",
+        "md"
       ]
     }
   ]
