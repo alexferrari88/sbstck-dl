@@ -16,10 +16,12 @@ import (
 	"github.com/k3a/html2text"
 )
 
+// RawPost represents a raw Substack post in string format.
 type RawPost struct {
 	str string
 }
 
+// ToPost converts the RawPost to a structured Post object.
 func (r *RawPost) ToPost() (Post, error) {
 	var wrapper PostWrapper
 	err := json.Unmarshal([]byte(r.str), &wrapper)
@@ -30,6 +32,7 @@ func (r *RawPost) ToPost() (Post, error) {
 	return wrapper.Post, nil
 }
 
+// Post represents a structured Substack post with various fields.
 type Post struct {
 	Id               int    `json:"id"`
 	PublicationId    int    `json:"publication_id"`
@@ -47,6 +50,7 @@ type Post struct {
 	BodyHTML string `json:"body_html"`
 }
 
+// ToMD converts the Post's HTML body to Markdown format.
 func (p *Post) ToMD(withTitle bool) (string, error) {
 	var title string
 	if withTitle {
@@ -60,6 +64,7 @@ func (p *Post) ToMD(withTitle bool) (string, error) {
 	return title + body, nil
 }
 
+// ToText converts the Post's HTML body to plain text format.
 func (p *Post) ToText(withTitle bool) string {
 	if withTitle {
 		return p.Title + "\n\n" + html2text.HTML2Text(p.BodyHTML)
@@ -67,6 +72,7 @@ func (p *Post) ToText(withTitle bool) string {
 	return html2text.HTML2Text(p.BodyHTML)
 }
 
+// ToHTML returns the Post's HTML body as-is or with an optional title header.
 func (p *Post) ToHTML(withTitle bool) string {
 	if withTitle {
 		return fmt.Sprintf("<h1>%s</h1>\n\n%s", p.Title, p.BodyHTML)
@@ -74,6 +80,7 @@ func (p *Post) ToHTML(withTitle bool) string {
 	return p.BodyHTML
 }
 
+// ToJSON converts the Post to a JSON string.
 func (p *Post) ToJSON() (string, error) {
 	b, err := json.Marshal(p)
 	if err != nil {
@@ -82,6 +89,7 @@ func (p *Post) ToJSON() (string, error) {
 	return string(b), nil
 }
 
+// WriteToFile writes the Post's content to a file in the specified format (html, md, or txt).
 func (p *Post) WriteToFile(path string, format string) error {
 	err := os.MkdirAll(filepath.Dir(path), 0755)
 	if err != nil {
@@ -119,21 +127,26 @@ func (p *Post) WriteToFile(path string, format string) error {
 	return nil
 }
 
+// PostWrapper wraps a Post object for JSON unmarshaling.
 type PostWrapper struct {
 	Post Post `json:"post"`
 }
 
+// Extractor is a utility for extracting Substack posts from URLs.
 type Extractor struct {
 	fetcher *Fetcher
 }
 
+// NewExtractor creates a new Extractor with the provided Fetcher.
+// If the Fetcher is nil, a default Fetcher will be used.
 func NewExtractor(f *Fetcher) *Extractor {
 	if f == nil {
-		f = NewFetcher(10, nil)
+		f = NewFetcher(10, nil, nil)
 	}
 	return &Extractor{fetcher: f}
 }
 
+// findScriptContent finds the content of the <script> tag containing JSON data.
 func findScriptContent(doc *goquery.Document) string {
 	scriptContent := ""
 	doc.Find("script").EachWithBreak(func(i int, s *goquery.Selection) bool {
