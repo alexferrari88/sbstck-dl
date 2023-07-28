@@ -63,15 +63,15 @@ func makeDateFilterFunc(beforeDate string, afterDate string) lib.DateFilterFunc 
 	var dateFilterFunc lib.DateFilterFunc
 	if beforeDate != "" && afterDate != "" {
 		dateFilterFunc = func(date string) bool {
-			return date >= afterDate && date <= beforeDate
+			return date > afterDate && date < beforeDate
 		}
 	} else if beforeDate != "" {
 		dateFilterFunc = func(date string) bool {
-			return date <= beforeDate
+			return date < beforeDate
 		}
 	} else if afterDate != "" {
 		dateFilterFunc = func(date string) bool {
-			return date >= afterDate
+			return date > afterDate
 		}
 	}
 	return dateFilterFunc
