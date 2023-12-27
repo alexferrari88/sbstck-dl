@@ -17,6 +17,7 @@ var (
 	downloadUrl  string
 	format       string
 	outputFolder string
+	cookie       string
 	dryRun       bool
 	downloadCmd  = &cobra.Command{
 		Use:   "download",
@@ -38,7 +39,7 @@ var (
 					fmt.Println("Warning: --before and --after flags are ignored when downloading a single post")
 				}
 
-				post, err := extractor.ExtractPost(ctx, downloadUrl)
+				post, err := extractor.ExtractPost(ctx, downloadUrl, cookie)
 				if err != nil {
 					log.Fatalln(err)
 				}
@@ -61,7 +62,7 @@ var (
 				// we are downloading the entire archive
 				var downloadedPostsCount int
 				dateFilterfunc := makeDateFilterFunc(beforeDate, afterDate)
-				urls, err := extractor.GetAllPostsURLs(ctx, downloadUrl, dateFilterfunc)
+				urls, err := extractor.GetAllPostsURLs(ctx, downloadUrl, dateFilterfunc, cookie)
 				if err != nil {
 					log.Fatalln(err)
 				}
@@ -77,7 +78,7 @@ var (
 					progressbar.OptionSetWidth(25),
 					progressbar.OptionSetDescription("downloading"),
 					progressbar.OptionShowBytes(true))
-				for result := range extractor.ExtractAllPosts(ctx, urls) {
+				for result := range extractor.ExtractAllPosts(ctx, urls, cookie) {
 					select {
 					case <-ctx.Done():
 						log.Fatalln("context cancelled")
@@ -116,6 +117,7 @@ var (
 func init() {
 	rootCmd.AddCommand(downloadCmd)
 	downloadCmd.PersistentFlags().StringVarP(&downloadUrl, "url", "u", "", "Specify the Substack url")
+	downloadCmd.PersistentFlags().StringVarP(&cookie, "cookie", "c", "", "Specify the Substack request cookie(s)")
 	downloadCmd.PersistentFlags().StringVarP(&format, "format", "f", "html", "Specify the output format (options: \"html\", \"md\", \"txt\"")
 	downloadCmd.PersistentFlags().StringVarP(&outputFolder, "output", "o", ".", "Specify the download directory")
 	downloadCmd.PersistentFlags().BoolVarP(&dryRun, "dry-run", "d", false, "Enable dry run")

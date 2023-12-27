@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
@@ -82,9 +83,10 @@ func NewFetcher(ratePerSecond int, proxyURL *url.URL, b backoff.BackOff) *Fetche
 
 // FetchURLs concurrently fetches the specified URLs and returns a channel to receive the FetchResults.
 // The returned channel will be closed once all fetch operations are completed.
-func (f *Fetcher) FetchURLs(ctx context.Context, urls []string) <-chan FetchResult {
+func (f *Fetcher) FetchURLs(ctx context.Context, urls []string, cookie string) <-chan FetchResult {
 	results := make(chan FetchResult, len(urls))
-	ctx, _ = context.WithCancel(ctx)
+	ctx, cancelFn := context.WithCancel(ctx)
+	defer cancelFn()
 	var eg errgroup.Group
 
 	sem := make(chan struct{}, f.RateLimiter.Burst()) // worker pool
@@ -94,7 +96,7 @@ func (f *Fetcher) FetchURLs(ctx context.Context, urls []string) <-chan FetchResu
 		eg.Go(func() error {
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			body, err := f.FetchURL(ctx, u)
+			body, err := f.FetchURL(ctx, u, cookie)
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
@@ -115,7 +117,7 @@ func (f *Fetcher) FetchURLs(ctx context.Context, urls []string) <-chan FetchResu
 
 // FetchURL fetches the specified URL and returns the response body as io.ReadCloser and any encountered error.
 // It uses rate limiting and retry mechanisms to handle rate limits and transient failures.
-func (f *Fetcher) FetchURL(ctx context.Context, url string) (io.ReadCloser, error) {
+func (f *Fetcher) FetchURL(ctx context.Context, url, cookie string) (io.ReadCloser, error) {
 
 	var body io.ReadCloser
 	var err error
@@ -134,7 +136,7 @@ func (f *Fetcher) FetchURL(ctx context.Context, url string) (io.ReadCloser, erro
 		if err != nil {
 			return err // Could be a context cancellation or error in limiter
 		}
-		body, err = f.fetch(ctx, url)
+		body, err = f.fetch(ctx, url, cookie)
 		if err != nil {
 			retryCounter++
 		}
@@ -155,14 +157,43 @@ func (f *Fetcher) FetchURL(ctx context.Context, url string) (io.ReadCloser, erro
 	return body, err
 }
 
+func parseCookie(cookieString, targetKey string) (*http.Cookie, error) {
+	// Split the cookie string into individual cookies
+	cookies := strings.Split(cookieString, "; ")
+	for _, c := range cookies {
+		// Split each cookie into key and value
+		parts := strings.SplitN(c, "=", 2)
+		if len(parts) != 2 {
+			return nil, fmt.Errorf("invalid cookie format")
+		}
+
+		key, value := parts[0], parts[1]
+
+		// Check if this is the target cookie
+		if key == targetKey {
+			return &http.Cookie{Name: key, Value: value}, nil
+		}
+	}
+
+	return nil, fmt.Errorf("target cookie not found")
+}
+
 // fetch performs the actual HTTP GET request to the specified URL and returns the response body and any encountered error.
 // It checks for too many requests (status code 429) and handles it by returning a FetchError.
-func (f *Fetcher) fetch(ctx context.Context, url string) (io.ReadCloser, error) {
+func (f *Fetcher) fetch(ctx context.Context, url, cookie string) (io.ReadCloser, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("User-Agent", userAgent)
+
+	if cookie != "" {
+		cookie, err := parseCookie(cookie, "substack.sid")
+		if err != nil {
+			return nil, err
+		}
+		req.AddCookie(cookie)
+	}
 
 	res, err := f.Client.Do(req)
 	if err != nil {

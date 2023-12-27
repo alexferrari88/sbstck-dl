@@ -170,9 +170,9 @@ func extractJSONString(scriptContent string) (string, error) {
 	return scriptContent[start+len("JSON.parse(\"") : end], nil
 }
 
-func (e *Extractor) ExtractPost(ctx context.Context, pageUrl string) (Post, error) {
+func (e *Extractor) ExtractPost(ctx context.Context, pageUrl, cookie string) (Post, error) {
 	// fetch page HTML content
-	body, err := e.fetcher.FetchURL(ctx, pageUrl)
+	body, err := e.fetcher.FetchURL(ctx, pageUrl, cookie)
 	if err != nil {
 		return Post{}, fmt.Errorf("failed to fetch page: %s", err)
 	}
@@ -213,7 +213,7 @@ func (e *Extractor) ExtractPost(ctx context.Context, pageUrl string) (Post, erro
 
 type DateFilterFunc func(string) bool
 
-func (e *Extractor) GetAllPostsURLs(ctx context.Context, pubUrl string, f DateFilterFunc) ([]string, error) {
+func (e *Extractor) GetAllPostsURLs(ctx context.Context, pubUrl string, f DateFilterFunc, cookie string) ([]string, error) {
 	u, err := url.Parse(pubUrl)
 	if err != nil {
 		return nil, err
@@ -225,7 +225,7 @@ func (e *Extractor) GetAllPostsURLs(ctx context.Context, pubUrl string, f DateFi
 	}
 
 	// fetch the sitemap of the publication
-	body, err := e.fetcher.FetchURL(ctx, u.String())
+	body, err := e.fetcher.FetchURL(ctx, u.String(), cookie)
 	if err != nil {
 		return nil, err
 	}
@@ -269,7 +269,7 @@ type ExtractResult struct {
 	Err  error
 }
 
-func (e *Extractor) ExtractAllPosts(ctx context.Context, urls []string) <-chan ExtractResult {
+func (e *Extractor) ExtractAllPosts(ctx context.Context, urls []string, cookie string) <-chan ExtractResult {
 	ch := make(chan ExtractResult, len(urls))
 
 	go func() {
@@ -278,7 +278,7 @@ func (e *Extractor) ExtractAllPosts(ctx context.Context, urls []string) <-chan E
 		for _, u := range urls {
 			go func(url string) {
 				defer wg.Done()
-				post, err := e.ExtractPost(ctx, url)
+				post, err := e.ExtractPost(ctx, url, cookie)
 				ch <- ExtractResult{Post: post, Err: err}
 			}(u)
 		}
