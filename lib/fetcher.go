@@ -96,7 +96,7 @@ func (f *Fetcher) FetchURLs(ctx context.Context, urls []string, cookie string) <
 		eg.Go(func() error {
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			body, err := f.FetchURL(ctx, u, cookie)
+			body, err := f.FetchURL(ctx, u, nil)
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
