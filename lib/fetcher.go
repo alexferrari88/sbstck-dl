@@ -157,11 +157,11 @@ func (f *Fetcher) FetchURL(ctx context.Context, url, cookie string) (io.ReadClos
 	return body, err
 }
 
+// Retrieve the cookie with the targetKey from a cookie blob
+// Expect cookies to be set as key=value with multiple k-v pairs seperated with semi-colons
 func parseCookie(cookieString, targetKey string) (*http.Cookie, error) {
-	// Split the cookie string into individual cookies
 	cookies := strings.Split(cookieString, "; ")
 	for _, c := range cookies {
-		// Split each cookie into key and value
 		parts := strings.SplitN(c, "=", 2)
 		if len(parts) != 2 {
 			return nil, fmt.Errorf("invalid cookie format")
