@@ -166,10 +166,7 @@ func parseCookie(cookieString, targetKey string) (*http.Cookie, error) {
 		if len(parts) != 2 {
 			return nil, fmt.Errorf("invalid cookie format")
 		}
-
 		key, value := parts[0], parts[1]
-
-		// Check if this is the target cookie
 		if key == targetKey {
 			return &http.Cookie{Name: key, Value: value}, nil
 		}
