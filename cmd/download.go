@@ -38,22 +38,21 @@ var (
 				if (beforeDate != "" || afterDate != "") && verbose {
 					fmt.Println("Warning: --before and --after flags are ignored when downloading a single post")
 				}
-
-				post, err := extractor.ExtractPost(ctx, downloadUrl, cookie)
-				if err != nil {
-					log.Fatalln(err)
+				res := <-extractor.ExtractAllPosts(ctx, []string{downloadUrl}, cookie)
+				if res.Err != nil {
+					log.Fatalln(res.Err)
 				}
 				downloadTime := time.Since(startTime)
 				if verbose {
 					fmt.Printf("Downloaded post %s in %s\n", downloadUrl, downloadTime)
 				}
 
-				path := makePath(post, outputFolder, format)
+				path := makePath(res.Post, outputFolder, format)
 				if verbose {
 					fmt.Printf("Writing post to file %s\n", path)
 				}
 
-				post.WriteToFile(path, format)
+				res.Post.WriteToFile(path, format)
 
 				if verbose {
 					fmt.Println("Done in ", time.Since(startTime))

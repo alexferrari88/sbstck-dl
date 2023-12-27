@@ -117,7 +117,7 @@ func (f *Fetcher) FetchURLs(ctx context.Context, urls []string, cookie string) <
 
 // FetchURL fetches the specified URL and returns the response body as io.ReadCloser and any encountered error.
 // It uses rate limiting and retry mechanisms to handle rate limits and transient failures.
-func (f *Fetcher) FetchURL(ctx context.Context, url, cookie string) (io.ReadCloser, error) {
+func (f *Fetcher) FetchURL(ctx context.Context, url string, cookie *http.Cookie) (io.ReadCloser, error) {
 
 	var body io.ReadCloser
 	var err error
@@ -177,18 +177,14 @@ func parseCookie(cookieString, targetKey string) (*http.Cookie, error) {
 
 // fetch performs the actual HTTP GET request to the specified URL and returns the response body and any encountered error.
 // It checks for too many requests (status code 429) and handles it by returning a FetchError.
-func (f *Fetcher) fetch(ctx context.Context, url, cookie string) (io.ReadCloser, error) {
+func (f *Fetcher) fetch(ctx context.Context, url string, cookie *http.Cookie) (io.ReadCloser, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("User-Agent", userAgent)
 
-	if cookie != "" {
-		cookie, err := parseCookie(cookie, "substack.sid")
-		if err != nil {
-			return nil, err
-		}
+	if cookie != nil {
 		req.AddCookie(cookie)
 	}
 
