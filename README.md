@@ -34,7 +34,7 @@ Use "sbstck-dl [command] --help" for more information about a command.
 
 ### Downloading posts
 
-You can provide the url of a single post or the main url of the Substack you want to download.
+You can provide the url of a single post or the main url of the Substack you want to download. If attempting to download premium content, get the cookies used during the `GET` request for your article in the browser and provide it with the `-c` flag.
 
 ```bash
 Usage:
