@@ -62,7 +62,7 @@ var (
 				// we are downloading the entire archive
 				var downloadedPostsCount int
 				dateFilterfunc := makeDateFilterFunc(beforeDate, afterDate)
-				urls, err := extractor.GetAllPostsURLs(ctx, downloadUrl, dateFilterfunc, cookie)
+				urls, err := extractor.GetAllPostsURLs(ctx, downloadUrl, dateFilterfunc)
 				if err != nil {
 					log.Fatalln(err)
 				}

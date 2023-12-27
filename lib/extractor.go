@@ -213,7 +213,7 @@ func (e *Extractor) ExtractPost(ctx context.Context, pageUrl, cookie string) (Po
 
 type DateFilterFunc func(string) bool
 
-func (e *Extractor) GetAllPostsURLs(ctx context.Context, pubUrl string, f DateFilterFunc, cookie string) ([]string, error) {
+func (e *Extractor) GetAllPostsURLs(ctx context.Context, pubUrl string, f DateFilterFunc) ([]string, error) {
 	u, err := url.Parse(pubUrl)
 	if err != nil {
 		return nil, err
@@ -225,7 +225,7 @@ func (e *Extractor) GetAllPostsURLs(ctx context.Context, pubUrl string, f DateFi
 	}
 
 	// fetch the sitemap of the publication
-	body, err := e.fetcher.FetchURL(ctx, u.String(), cookie)
+	body, err := e.fetcher.FetchURL(ctx, u.String(), "")
 	if err != nil {
 		return nil, err
 	}
