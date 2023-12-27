@@ -46,6 +46,7 @@ Flags:
   -h, --help            help for download
   -o, --output string   Specify the download directory (default ".")
   -u, --url string      Specify the Substack url
+  -c, --cookie string   Specify your Substack cookie 
 
 Global Flags:
       --after string    Download posts published after this date (format: YYYY-MM-DD)
