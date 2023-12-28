@@ -121,9 +121,11 @@ func (f *Fetcher) FetchURLs(ctx context.Context, urls []string) <-chan FetchResu
 // FetchURL fetches the specified URL and returns the response body as io.ReadCloser and any encountered error.
 // It uses rate limiting and retry mechanisms to handle rate limits and transient failures.
 func (f *Fetcher) FetchURL(ctx context.Context, url string) (io.ReadCloser, error) {
+
 	var body io.ReadCloser
 	var err error
 	var retryCounter int
+
 	var nextRetryWait time.Duration
 	operation := func() error {
 		if retryCounter >= defaultMaxRetryCount {
@@ -152,7 +154,9 @@ func (f *Fetcher) FetchURL(ctx context.Context, url string) (io.ReadCloser, erro
 			}
 		}
 	}
+
 	backoff.RetryNotify(operation, f.BackoffCfg, notify)
+
 	return body, err
 }
 

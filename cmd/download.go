@@ -41,6 +41,7 @@ var (
 				if (beforeDate != "" || afterDate != "") && verbose {
 					fmt.Println("Warning: --before and --after flags are ignored when downloading a single post")
 				}
+
 				post, err := extractor.ExtractPost(ctx, downloadUrl)
 				if err != nil {
 					log.Fatalln(err)
