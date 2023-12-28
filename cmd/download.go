@@ -94,7 +94,6 @@ var (
 						continue
 					}
 					bar.Add(1)
-					downloadedPostsCount++
 					if verbose {
 						fmt.Printf("Downloading post %s\n", result.Post.CanonicalUrl)
 					}
@@ -105,7 +104,14 @@ var (
 						fmt.Printf("Writing post to file %s\n", path)
 					}
 
-					post.WriteToFile(path, format)
+					err = post.WriteToFile(path, format)
+					if err != nil {
+						if verbose {
+							fmt.Printf("Failed to write '%s', got error '%s'", path, err.Error())
+						}
+					} else {
+						downloadedPostsCount++
+					}
 				}
 				if verbose {
 					fmt.Println("Downloaded", downloadedPostsCount, "posts, out of", len(urls))
