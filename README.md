@@ -34,7 +34,9 @@ Use "sbstck-dl [command] --help" for more information about a command.
 
 ### Downloading posts
 
-You can provide the url of a single post or the main url of the Substack you want to download. If attempting to download premium content, get the cookies used during the `GET` request for your article in the browser and provide it with the `-c` flag.
+You can provide the url of a single post or the main url of the Substack you want to download. 
+
+To download or access premium content, first log into to your Substack account with access to premium posts. Then, capture the cookies used during the `GET` request for any of the articles and pass it via the `-c` flag.
 
 ```bash
 Usage:
@@ -46,7 +48,7 @@ Flags:
   -h, --help            help for download
   -o, --output string   Specify the download directory (default ".")
   -u, --url string      Specify the Substack url
-  -c, --cookie string   Specify your Substack cookie 
+  -c, --cookies string  Specify the request cookies (format: key1=value1; key2=value2; ...) 
 
 Global Flags:
       --after string    Download posts published after this date (format: YYYY-MM-DD)

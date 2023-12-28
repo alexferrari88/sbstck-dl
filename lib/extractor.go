@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -171,9 +170,9 @@ func extractJSONString(scriptContent string) (string, error) {
 	return scriptContent[start+len("JSON.parse(\"") : end], nil
 }
 
-func (e *Extractor) ExtractPost(ctx context.Context, pageUrl string, cookie *http.Cookie) (Post, error) {
+func (e *Extractor) ExtractPost(ctx context.Context, pageUrl string) (Post, error) {
 	// fetch page HTML content
-	body, err := e.fetcher.FetchURL(ctx, pageUrl, cookie)
+	body, err := e.fetcher.FetchURL(ctx, pageUrl)
 	if err != nil {
 		return Post{}, fmt.Errorf("failed to fetch page: %s", err)
 	}
@@ -226,7 +225,7 @@ func (e *Extractor) GetAllPostsURLs(ctx context.Context, pubUrl string, f DateFi
 	}
 
 	// fetch the sitemap of the publication
-	body, err := e.fetcher.FetchURL(ctx, u.String(), nil)
+	body, err := e.fetcher.FetchURL(ctx, u.String())
 	if err != nil {
 		return nil, err
 	}
@@ -270,23 +269,15 @@ type ExtractResult struct {
 	Err  error
 }
 
-func (e *Extractor) ExtractAllPosts(ctx context.Context, urls []string, cookieStr string) <-chan ExtractResult {
+func (e *Extractor) ExtractAllPosts(ctx context.Context, urls []string) <-chan ExtractResult {
 	ch := make(chan ExtractResult, len(urls))
-	var cookie *http.Cookie
-	var err error
-	if cookieStr != "" {
-		cookie, err = parseCookie(cookieStr, "substack.sid")
-		if err != nil {
-			fmt.Printf("%+v", err)
-		}
-	}
 	go func() {
 		var wg sync.WaitGroup
 		wg.Add(len(urls))
 		for _, u := range urls {
 			go func(url string) {
 				defer wg.Done()
-				post, err := e.ExtractPost(ctx, url, cookie)
+				post, err := e.ExtractPost(ctx, url)
 				ch <- ExtractResult{Post: post, Err: err}
 			}(u)
 		}
@@ -295,4 +286,10 @@ func (e *Extractor) ExtractAllPosts(ctx context.Context, urls []string, cookieSt
 	}()
 
 	return ch
+}
+
+func (e *Extractor) SetCookie(cookieStr string) {
+	if e.fetcher != nil {
+		e.fetcher.SetCookie(cookieStr)
+	}
 }

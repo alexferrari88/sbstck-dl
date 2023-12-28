@@ -33,11 +33,14 @@ const defaultMaxInterval = 2 * time.Minute
 // userAgent specifies the User-Agent header value used in HTTP requests.
 const userAgent = "sbstck-dl/0.1"
 
+const targetCookieKey = "substack.sid"
+
 // Fetcher represents a URL fetcher with rate limiting and retry mechanisms.
 type Fetcher struct {
 	Client      *http.Client
 	RateLimiter *rate.Limiter
 	BackoffCfg  backoff.BackOff
+	Cookie      *http.Cookie
 }
 
 // FetchResult represents the result of a URL fetch operation.
@@ -83,7 +86,7 @@ func NewFetcher(ratePerSecond int, proxyURL *url.URL, b backoff.BackOff) *Fetche
 
 // FetchURLs concurrently fetches the specified URLs and returns a channel to receive the FetchResults.
 // The returned channel will be closed once all fetch operations are completed.
-func (f *Fetcher) FetchURLs(ctx context.Context, urls []string, cookie string) <-chan FetchResult {
+func (f *Fetcher) FetchURLs(ctx context.Context, urls []string) <-chan FetchResult {
 	results := make(chan FetchResult, len(urls))
 	ctx, cancelFn := context.WithCancel(ctx)
 	defer cancelFn()
@@ -96,7 +99,7 @@ func (f *Fetcher) FetchURLs(ctx context.Context, urls []string, cookie string) <
 		eg.Go(func() error {
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			body, err := f.FetchURL(ctx, u, nil)
+			body, err := f.FetchURL(ctx, u)
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
@@ -117,13 +120,11 @@ func (f *Fetcher) FetchURLs(ctx context.Context, urls []string, cookie string) <
 
 // FetchURL fetches the specified URL and returns the response body as io.ReadCloser and any encountered error.
 // It uses rate limiting and retry mechanisms to handle rate limits and transient failures.
-func (f *Fetcher) FetchURL(ctx context.Context, url string, cookie *http.Cookie) (io.ReadCloser, error) {
-
+func (f *Fetcher) FetchURL(ctx context.Context, url string) (io.ReadCloser, error) {
 	var body io.ReadCloser
 	var err error
 	var retryCounter int
 	var nextRetryWait time.Duration
-
 	operation := func() error {
 		if retryCounter >= defaultMaxRetryCount {
 			err = fmt.Errorf("max retry count reached for URL: %s", url)
@@ -136,7 +137,7 @@ func (f *Fetcher) FetchURL(ctx context.Context, url string, cookie *http.Cookie)
 		if err != nil {
 			return err // Could be a context cancellation or error in limiter
 		}
-		body, err = f.fetch(ctx, url, cookie)
+		body, err = f.fetch(ctx, url)
 		if err != nil {
 			retryCounter++
 		}
@@ -151,9 +152,7 @@ func (f *Fetcher) FetchURL(ctx context.Context, url string, cookie *http.Cookie)
 			}
 		}
 	}
-
 	backoff.RetryNotify(operation, f.BackoffCfg, notify)
-
 	return body, err
 }
 
@@ -164,27 +163,41 @@ func parseCookie(cookieString, targetKey string) (*http.Cookie, error) {
 	for _, c := range cookies {
 		parts := strings.SplitN(c, "=", 2)
 		if len(parts) != 2 {
-			return nil, fmt.Errorf("invalid cookie format")
+			fmt.Printf("Invalid cookie format, expected 'key=value' pairs separated by '; ' but got %s", c)
 		}
 		key, value := parts[0], parts[1]
 		if key == targetKey {
 			return &http.Cookie{Name: key, Value: value}, nil
 		}
 	}
+	return nil, fmt.Errorf("Cookie with key '%s' not found", targetKey)
+}
 
-	return nil, fmt.Errorf("target cookie not found")
+func (f *Fetcher) SetCookie(cookieStr string) {
+	cookie, err := parseCookie(cookieStr, targetCookieKey)
+	if err != nil {
+		fmt.Printf("Failed to parse cookie with error: '%s'", err.Error())
+	}
+	f.Cookie = cookie
+}
+
+func (f *Fetcher) GetCookie() *http.Cookie {
+	if f != nil {
+		return f.Cookie
+	}
+	return nil
 }
 
 // fetch performs the actual HTTP GET request to the specified URL and returns the response body and any encountered error.
 // It checks for too many requests (status code 429) and handles it by returning a FetchError.
-func (f *Fetcher) fetch(ctx context.Context, url string, cookie *http.Cookie) (io.ReadCloser, error) {
+func (f *Fetcher) fetch(ctx context.Context, url string) (io.ReadCloser, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("User-Agent", userAgent)
 
-	if cookie != nil {
+	if cookie := f.GetCookie(); cookie != nil {
 		req.AddCookie(cookie)
 	}
 
