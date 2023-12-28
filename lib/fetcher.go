@@ -200,7 +200,6 @@ func (f *Fetcher) fetch(ctx context.Context, url string) (io.ReadCloser, error) 
 	if cookie := f.GetCookie(); cookie != nil {
 		req.AddCookie(cookie)
 	}
-
 	res, err := f.Client.Do(req)
 	if err != nil {
 		return nil, err

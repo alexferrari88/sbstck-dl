@@ -271,6 +271,7 @@ type ExtractResult struct {
 
 func (e *Extractor) ExtractAllPosts(ctx context.Context, urls []string) <-chan ExtractResult {
 	ch := make(chan ExtractResult, len(urls))
+
 	go func() {
 		var wg sync.WaitGroup
 		wg.Add(len(urls))
