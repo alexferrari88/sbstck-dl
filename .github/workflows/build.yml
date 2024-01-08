@@ -9,20 +9,32 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        include:
+          - os: ubuntu-latest
+            goos: linux
+            goarch: amd64
+            name: ubuntu
+          - os: macos-latest
+            goos: darwin
+            goarch: amd64
+            name: mac
+          - os: windows-latest
+            goos: windows
+            goarch: amd64
+            name: win
         go-version: [1.21.5]
     steps:
-      - name: Set up Go
-        uses: actions/setup-go@v2
-        with:
-          go-version: ${{ matrix.go-version }}
-      - name: Check out code
-        uses: actions/checkout@v2
-      - name: Build
-        run: |
-          env GOOS=${{ matrix.platform.os }} GOARCH=${{ matrix.platform.arch }} go build -v -o sbstck-dl-${{ matrix.platform.os }}-${{ matrix.platform.arch }}
-      - name: Upload artifact
-        uses: actions/upload-artifact@v2
-        with:
-          name: sbstck-dl-${{ matrix.os }}
-          path: sbstck-dl-${{ matrix.os }}
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: ${{ matrix.go-version }}
+    - name: Check out code
+      uses: actions/checkout@v4
+    - name: Build
+      run: |
+        env GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build -v -o sbstck-dl-${{ matrix.goos }}-${{ matrix.goarch }}
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: sbstck-dl-${{ matrix.name }}-${{ matrix.goarch }}
+        path: sbstck-dl-${{ matrix.name }}-${{ matrix.goarch }}
