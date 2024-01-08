@@ -41,7 +41,7 @@ jobs:
       uses: actions/checkout@v4
     - name: Build
       run: |
-        env GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build -v -o sbstck-dl-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.extension }}
+        env GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build -v -o sbstck-dl-${{ matrix.name }}-${{ matrix.goarch }}${{ matrix.extension }}
     - name: Upload artifact
       uses: actions/upload-artifact@v4
       with:
