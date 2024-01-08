@@ -84,7 +84,8 @@ func NewFetcher(ratePerSecond int, proxyURL *url.URL, b backoff.BackOff) *Fetche
 // The returned channel will be closed once all fetch operations are completed.
 func (f *Fetcher) FetchURLs(ctx context.Context, urls []string) <-chan FetchResult {
 	results := make(chan FetchResult, len(urls))
-	ctx, _ = context.WithCancel(ctx)
+	ctx, ctxCancelFn := context.WithCancel(ctx)
+	defer ctxCancelFn()
 	var eg errgroup.Group
 
 	sem := make(chan struct{}, f.RateLimiter.Burst()) // worker pool
