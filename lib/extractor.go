@@ -141,7 +141,7 @@ type Extractor struct {
 // If the Fetcher is nil, a default Fetcher will be used.
 func NewExtractor(f *Fetcher) *Extractor {
 	if f == nil {
-		f = NewFetcher(10, nil, nil)
+		f = NewFetcher()
 	}
 	return &Extractor{fetcher: f}
 }

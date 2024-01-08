@@ -26,6 +26,7 @@ Flags:
       --before string   Download posts published before this date (format: YYYY-MM-DD)
   -h, --help            help for sbstck-dl
   -x, --proxy string    Specify the proxy url
+  -i, --sid string      Specify the substack.sid required to download private newsletters (found in the Substack's cookie)
   -r, --rate int        Specify the rate of requests per second (default 2)
   -v, --verbose         Enable verbose output
 
@@ -73,9 +74,13 @@ Global Flags:
   -v, --verbose         Enable verbose output
 ```
 
+## Thanks
+
+- [wemoveon2](https://github.com/wemoveon2) for the discussion and help implementing the support for private newsletters
+
 ## TODO
 
-- [ ] Add support for private blogs
+- [x] Add support for private newsletters
 - [ ] Improve retry logic
 - [x] Implement filtering
 - [ ] Implement loading from config file

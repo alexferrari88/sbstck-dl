@@ -37,6 +37,48 @@ type Fetcher struct {
 	Client      *http.Client
 	RateLimiter *rate.Limiter
 	BackoffCfg  backoff.BackOff
+	Cookie      *http.Cookie
+}
+
+// FetcherOptions holds configurable options for Fetcher.
+type FetcherOptions struct {
+	RatePerSecond int
+	ProxyURL      *url.URL
+	BackOffConfig backoff.BackOff
+	Cookie        *http.Cookie
+}
+
+// FetcherOption defines a function that applies a specific option to FetcherOptions.
+type FetcherOption func(*FetcherOptions)
+
+// WithRatePerSecond sets the rate per second for the Fetcher.
+func WithRatePerSecond(rate int) FetcherOption {
+	return func(o *FetcherOptions) {
+		o.RatePerSecond = rate
+	}
+}
+
+// WithProxyURL sets the proxy URL for the Fetcher.
+func WithProxyURL(proxyURL *url.URL) FetcherOption {
+	return func(o *FetcherOptions) {
+		o.ProxyURL = proxyURL
+	}
+}
+
+// WithBackOffConfig sets the backoff configuration for the Fetcher.
+func WithBackOffConfig(b backoff.BackOff) FetcherOption {
+	return func(o *FetcherOptions) {
+		o.BackOffConfig = b
+	}
+}
+
+// WithCookie sets the cookie for the Fetcher.
+func WithCookie(cookie *http.Cookie) FetcherOption {
+	return func(o *FetcherOptions) {
+		if cookie != nil {
+			o.Cookie = cookie
+		}
+	}
 }
 
 // FetchResult represents the result of a URL fetch operation.
@@ -57,26 +99,31 @@ func (e *FetchError) Error() string {
 	return fmt.Sprintf("too many requests, retry after %d seconds", e.RetryAfter)
 }
 
-// NewFetcher creates a new Fetcher with the specified ratePerSecond, proxyURL, and backoff configuration.
+// NewFetcher creates a new Fetcher with the provided options.
 // If ratePerSecond is 0, the default rate (DefaultRatePerSecond) is used.
 // If b is nil, the default backoff configuration is used.
-func NewFetcher(ratePerSecond int, proxyURL *url.URL, b backoff.BackOff) *Fetcher {
-	if ratePerSecond == 0 {
-		ratePerSecond = DefaultRatePerSecond
+func NewFetcher(opts ...FetcherOption) *Fetcher {
+	options := FetcherOptions{
+		RatePerSecond: DefaultRatePerSecond,
+		BackOffConfig: makeDefaultBackoff(),
 	}
-	if b == nil {
-		b = makeDefaultBackoff()
+
+	for _, opt := range opts {
+		opt(&options)
 	}
-	trasport := http.DefaultTransport
-	if proxyURL != nil {
-		trasport = &http.Transport{Proxy: http.ProxyURL(proxyURL)}
+
+	transport := http.DefaultTransport
+	if options.ProxyURL != nil {
+		transport = &http.Transport{Proxy: http.ProxyURL(options.ProxyURL)}
 	}
-	client := &http.Client{Transport: trasport}
+
+	client := &http.Client{Transport: transport}
 
 	return &Fetcher{
 		Client:      client,
-		RateLimiter: rate.NewLimiter(rate.Limit(ratePerSecond), 1), // 1 burst means that we can send 1 request at a time (limited to ratePerSecond)
-		BackoffCfg:  b,
+		RateLimiter: rate.NewLimiter(rate.Limit(options.RatePerSecond), 1),
+		BackoffCfg:  options.BackOffConfig,
+		Cookie:      options.Cookie,
 	}
 }
 
@@ -164,6 +211,11 @@ func (f *Fetcher) fetch(ctx context.Context, url string) (io.ReadCloser, error) 
 		return nil, err
 	}
 	req.Header.Set("User-Agent", userAgent)
+
+	// Add cookie to the request if it's not nil
+	if f.Cookie != nil {
+		req.AddCookie(f.Cookie)
+	}
 
 	res, err := f.Client.Do(req)
 	if err != nil {

@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"log"
+	"net/http"
 	"net/url"
 	"os"
 
@@ -18,6 +19,7 @@ var (
 	ratePerSecond  int
 	beforeDate     string
 	afterDate      string
+	substackID     string
 	ctx            = context.Background()
 	parsedProxyURL *url.URL
 	fetcher        *lib.Fetcher
@@ -33,6 +35,7 @@ var (
 // Execute adds all child commands to the root command and sets flags appropriately.
 // This is called by main.main(). It only needs to happen once to the rootCmd.
 func Execute() {
+	var cookie *http.Cookie
 	if proxyURL != "" {
 		var err error
 		parsedProxyURL, err = parseURL(proxyURL)
@@ -43,7 +46,13 @@ func Execute() {
 	if ratePerSecond == 0 {
 		log.Fatal("rate must be greater than 0")
 	}
-	fetcher = lib.NewFetcher(ratePerSecond, parsedProxyURL, nil)
+	if substackID != "" {
+		cookie = &http.Cookie{
+			Name:  "substack.sid",
+			Value: substackID,
+		}
+	}
+	fetcher = lib.NewFetcher(lib.WithRatePerSecond(ratePerSecond), lib.WithProxyURL(parsedProxyURL), lib.WithCookie(cookie))
 	extractor = lib.NewExtractor(fetcher)
 	err := rootCmd.Execute()
 	if err != nil {
@@ -53,6 +62,7 @@ func Execute() {
 
 func init() {
 	rootCmd.PersistentFlags().StringVarP(&proxyURL, "proxy", "x", "", "Specify the proxy url")
+	rootCmd.PersistentFlags().StringVarP(&substackID, "sid", "i", "", "The substack.sid cookie value (required for private newsletters)")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose output")
 	rootCmd.PersistentFlags().IntVarP(&ratePerSecond, "rate", "r", lib.DefaultRatePerSecond, "Specify the rate of requests per second")
 	rootCmd.PersistentFlags().StringVar(&beforeDate, "before", "", "Download posts published before this date (format: YYYY-MM-DD)")
