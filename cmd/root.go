@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"log"
 	"net/http"
 	"net/url"
@@ -13,13 +14,39 @@ import (
 
 // rootCmd represents the base command when called without any subcommands
 
+type cookieName string
+
+const (
+	substackSid cookieName = "substack.sid"
+	connectSid  cookieName = "connect.sid"
+)
+
+func (c *cookieName) String() string {
+	return string(*c)
+}
+
+func (c *cookieName) Set(val string) error {
+	switch val {
+	case "substack.sid", "connect.sid":
+		*c = cookieName(val)
+	default:
+		return errors.New("invalid cookie name: must be either substack.sid or connect.sid")
+	}
+	return nil
+}
+
+func (c *cookieName) Type() string {
+	return "cookieName"
+}
+
 var (
 	proxyURL       string
 	verbose        bool
 	ratePerSecond  int
 	beforeDate     string
 	afterDate      string
-	substackID     string
+	IdCookieName   cookieName
+	IdCookieVal    string
 	ctx            = context.Background()
 	parsedProxyURL *url.URL
 	fetcher        *lib.Fetcher
@@ -46,10 +73,20 @@ func Execute() {
 	if ratePerSecond == 0 {
 		log.Fatal("rate must be greater than 0")
 	}
-	if substackID != "" {
-		cookie = &http.Cookie{
-			Name:  "substack.sid",
-			Value: substackID,
+	if IdCookieVal != "" && IdCookieName == "" {
+		log.Fatal("You must specify the cookie name when using a cookie value")
+	}
+	if IdCookieVal != "" && IdCookieName != "" {
+		if IdCookieName == substackSid {
+			cookie = &http.Cookie{
+				Name:  "substack.sid",
+				Value: IdCookieVal,
+			}
+		} else if IdCookieName == connectSid {
+			cookie = &http.Cookie{
+				Name:  "connect.sid",
+				Value: IdCookieVal,
+			}
 		}
 	}
 	fetcher = lib.NewFetcher(lib.WithRatePerSecond(ratePerSecond), lib.WithProxyURL(parsedProxyURL), lib.WithCookie(cookie))
@@ -62,7 +99,8 @@ func Execute() {
 
 func init() {
 	rootCmd.PersistentFlags().StringVarP(&proxyURL, "proxy", "x", "", "Specify the proxy url")
-	rootCmd.PersistentFlags().StringVarP(&substackID, "sid", "i", "", "The substack.sid cookie value (required for private newsletters)")
+	rootCmd.PersistentFlags().Var(&IdCookieName, "cookie_name", "Either \"substack.sid\" or \"connect.sid\", based on the cookie you have (required for private newsletters)")
+	rootCmd.PersistentFlags().StringVar(&IdCookieVal, "cookie_val", "", "The substack.sid/connect.sid cookie value (required for private newsletters)")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose output")
 	rootCmd.PersistentFlags().IntVarP(&ratePerSecond, "rate", "r", lib.DefaultRatePerSecond, "Specify the rate of requests per second")
 	rootCmd.PersistentFlags().StringVar(&beforeDate, "before", "", "Download posts published before this date (format: YYYY-MM-DD)")

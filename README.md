@@ -22,13 +22,14 @@ Available Commands:
   version     Print the version number of sbstck-dl
 
 Flags:
-      --after string    Download posts published after this date (format: YYYY-MM-DD)
-      --before string   Download posts published before this date (format: YYYY-MM-DD)
-  -h, --help            help for sbstck-dl
-  -x, --proxy string    Specify the proxy url
-  -i, --sid string      Specify the substack.sid required to download private newsletters (found in the Substack's cookie)
-  -r, --rate int        Specify the rate of requests per second (default 2)
-  -v, --verbose         Enable verbose output
+      --after string             Download posts published after this date (format: YYYY-MM-DD)
+      --before string            Download posts published before this date (format: YYYY-MM-DD)
+      --cookie_name cookieName   Either substack.sid or connect.sid, based on your cookie (required for private newsletters)
+      --cookie_val string        The substack.sid/connect.sid cookie value (required for private newsletters)
+  -h, --help                     help for sbstck-dl
+  -x, --proxy string             Specify the proxy url
+  -r, --rate int                 Specify the rate of requests per second (default 2)
+  -v, --verbose                  Enable verbose output
 
 Use "sbstck-dl [command] --help" for more information about a command.
 ```
@@ -74,9 +75,22 @@ Global Flags:
   -v, --verbose         Enable verbose output
 ```
 
+### Private Newsletters
+
+In order to download the full text of private newsletters you need to provide the cookie name and value of your session.
+The cookie name is either `substack.sid` or `connect.sid`, based on your cookie.
+To get the cookie value you can use the developer tools of your browser.
+Once you have the cookie name and value, you can pass them to the downloader using the `--cookie_name` and `--cookie_val` flags.
+
+#### Example
+
+```bash
+sbstck-dl download --url https://example.substack.com --cookie_name substack.sid --cookie_val COOKIE_VALUE
+```
+
 ## Thanks
 
-- [wemoveon2](https://github.com/wemoveon2) for the discussion and help implementing the support for private newsletters
+- [wemoveon2](https://github.com/wemoveon2) and [lenzj](https://github.com/lenzj) for the discussion and help implementing the support for private newsletters
 
 ## TODO
 
