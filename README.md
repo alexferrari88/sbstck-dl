@@ -4,6 +4,13 @@ Simple CLI tool to download one or all the posts from a Substack blog.
 
 ## Installation
 
+### Downloading the binary
+
+Check in the [releases](https://github.com/alexferrari88/sbstck-dl/releases) page for the latest version of the binary for your platform.
+We provide binaries for Linux, MacOS and Windows.
+
+### Using Go
+
 ```bash
 go install github.com/alexferrari88/sbstck-dl
 ```
@@ -15,7 +22,6 @@ Usage:
   sbstck-dl [command]
 
 Available Commands:
-  completion  Generate the autocompletion script for the specified shell
   download    Download individual posts or the entire public archive
   help        Help about any command
   list        List the posts of a Substack
@@ -98,11 +104,12 @@ sbstck-dl download --url https://example.substack.com --cookie_name substack.sid
 
 ## TODO
 
-- [x] Add support for private newsletters
+- [ ] Implementing resuming downloads
 - [ ] Improve retry logic
-- [x] Implement filtering
 - [ ] Implement loading from config file
 - [ ] Add support for downloading media
 - [ ] Add tests
 - [ ] Add CI
 - [x] Add documentation
+- [x] Add support for private newsletters
+- [x] Implement filtering by date
