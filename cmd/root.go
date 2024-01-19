@@ -63,6 +63,7 @@ var (
 // This is called by main.main(). It only needs to happen once to the rootCmd.
 func Execute() {
 	var cookie *http.Cookie
+
 	if proxyURL != "" {
 		var err error
 		parsedProxyURL, err = parseURL(proxyURL)
@@ -70,12 +71,11 @@ func Execute() {
 			log.Fatal(err)
 		}
 	}
+
 	if ratePerSecond == 0 {
 		log.Fatal("rate must be greater than 0")
 	}
-	if idCookieVal != "" && idCookieName == "" {
-		log.Fatal("You must specify the cookie name when using a cookie value")
-	}
+
 	if idCookieVal != "" && idCookieName != "" {
 		if idCookieName == substackSid {
 			cookie = &http.Cookie{
@@ -89,8 +89,10 @@ func Execute() {
 			}
 		}
 	}
+
 	fetcher = lib.NewFetcher(lib.WithRatePerSecond(ratePerSecond), lib.WithProxyURL(parsedProxyURL), lib.WithCookie(cookie))
 	extractor = lib.NewExtractor(fetcher)
+
 	err := rootCmd.Execute()
 	if err != nil {
 		os.Exit(1)
@@ -105,6 +107,7 @@ func init() {
 	rootCmd.PersistentFlags().IntVarP(&ratePerSecond, "rate", "r", lib.DefaultRatePerSecond, "Specify the rate of requests per second")
 	rootCmd.PersistentFlags().StringVar(&beforeDate, "before", "", "Download posts published before this date (format: YYYY-MM-DD)")
 	rootCmd.PersistentFlags().StringVar(&afterDate, "after", "", "Download posts published after this date (format: YYYY-MM-DD)")
+	rootCmd.MarkFlagsRequiredTogether("cookie_name", "cookie_val")
 }
 
 func makeDateFilterFunc(beforeDate string, afterDate string) lib.DateFilterFunc {

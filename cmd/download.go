@@ -115,11 +115,11 @@ var (
 
 func init() {
 	rootCmd.AddCommand(downloadCmd)
-	downloadCmd.PersistentFlags().StringVarP(&downloadUrl, "url", "u", "", "Specify the Substack url")
-	downloadCmd.PersistentFlags().StringVarP(&format, "format", "f", "html", "Specify the output format (options: \"html\", \"md\", \"txt\"")
-	downloadCmd.PersistentFlags().StringVarP(&outputFolder, "output", "o", ".", "Specify the download directory")
-	downloadCmd.PersistentFlags().BoolVarP(&dryRun, "dry-run", "d", false, "Enable dry run")
-	downloadCmd.MarkPersistentFlagRequired("url")
+	downloadCmd.Flags().StringVarP(&downloadUrl, "url", "u", "", "Specify the Substack url")
+	downloadCmd.Flags().StringVarP(&format, "format", "f", "html", "Specify the output format (options: \"html\", \"md\", \"txt\"")
+	downloadCmd.Flags().StringVarP(&outputFolder, "output", "o", ".", "Specify the download directory")
+	downloadCmd.Flags().BoolVarP(&dryRun, "dry-run", "d", false, "Enable dry run")
+	downloadCmd.MarkFlagRequired("url")
 }
 
 func convertDateTime(datetime string) string {

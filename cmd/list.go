@@ -42,6 +42,6 @@ var (
 func init() {
 	rootCmd.AddCommand(listCmd)
 
-	listCmd.PersistentFlags().StringVarP(&pubUrl, "url", "u", "", "Specify the Substack url")
-	listCmd.MarkPersistentFlagRequired("url")
+	listCmd.Flags().StringVarP(&pubUrl, "url", "u", "", "Specify the Substack url")
+	listCmd.MarkFlagRequired("url")
 }
