@@ -56,43 +56,45 @@ var (
 		Use:   "sbstck-dl",
 		Short: "Substack Downloader",
 		Long:  `sbstck-dl is a command line tool for downloading Substack newsletters for archival purposes, offline reading, or data analysis.`,
+		PersistentPreRun: func(cmd *cobra.Command, args []string) {
+
+			var cookie *http.Cookie
+
+			if proxyURL != "" {
+				var err error
+				parsedProxyURL, err = parseURL(proxyURL)
+				if err != nil {
+					log.Fatal(err)
+				}
+			}
+
+			if ratePerSecond == 0 {
+				log.Fatal("rate must be greater than 0")
+			}
+
+			if idCookieVal != "" && idCookieName != "" {
+				if idCookieName == substackSid {
+					cookie = &http.Cookie{
+						Name:  "substack.sid",
+						Value: idCookieVal,
+					}
+				} else if idCookieName == connectSid {
+					cookie = &http.Cookie{
+						Name:  "connect.sid",
+						Value: idCookieVal,
+					}
+				}
+			}
+
+			fetcher = lib.NewFetcher(lib.WithRatePerSecond(ratePerSecond), lib.WithProxyURL(parsedProxyURL), lib.WithCookie(cookie))
+			extractor = lib.NewExtractor(fetcher)
+		},
 	}
 )
 
 // Execute adds all child commands to the root command and sets flags appropriately.
 // This is called by main.main(). It only needs to happen once to the rootCmd.
 func Execute() {
-	var cookie *http.Cookie
-
-	if proxyURL != "" {
-		var err error
-		parsedProxyURL, err = parseURL(proxyURL)
-		if err != nil {
-			log.Fatal(err)
-		}
-	}
-
-	if ratePerSecond == 0 {
-		log.Fatal("rate must be greater than 0")
-	}
-
-	if idCookieVal != "" && idCookieName != "" {
-		if idCookieName == substackSid {
-			cookie = &http.Cookie{
-				Name:  "substack.sid",
-				Value: idCookieVal,
-			}
-		} else if idCookieName == connectSid {
-			cookie = &http.Cookie{
-				Name:  "connect.sid",
-				Value: idCookieVal,
-			}
-		}
-	}
-
-	fetcher = lib.NewFetcher(lib.WithRatePerSecond(ratePerSecond), lib.WithProxyURL(parsedProxyURL), lib.WithCookie(cookie))
-	extractor = lib.NewExtractor(fetcher)
-
 	err := rootCmd.Execute()
 	if err != nil {
 		os.Exit(1)
