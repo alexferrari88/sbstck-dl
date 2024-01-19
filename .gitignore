@@ -23,3 +23,6 @@ go.work
 
 # Directory contained scraped content
 scraped/
+
+# vscode
+.vscode/

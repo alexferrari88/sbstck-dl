@@ -45,8 +45,8 @@ var (
 	ratePerSecond  int
 	beforeDate     string
 	afterDate      string
-	IdCookieName   cookieName
-	IdCookieVal    string
+	idCookieName   cookieName
+	idCookieVal    string
 	ctx            = context.Background()
 	parsedProxyURL *url.URL
 	fetcher        *lib.Fetcher
@@ -73,19 +73,19 @@ func Execute() {
 	if ratePerSecond == 0 {
 		log.Fatal("rate must be greater than 0")
 	}
-	if IdCookieVal != "" && IdCookieName == "" {
+	if idCookieVal != "" && idCookieName == "" {
 		log.Fatal("You must specify the cookie name when using a cookie value")
 	}
-	if IdCookieVal != "" && IdCookieName != "" {
-		if IdCookieName == substackSid {
+	if idCookieVal != "" && idCookieName != "" {
+		if idCookieName == substackSid {
 			cookie = &http.Cookie{
 				Name:  "substack.sid",
-				Value: IdCookieVal,
+				Value: idCookieVal,
 			}
-		} else if IdCookieName == connectSid {
+		} else if idCookieName == connectSid {
 			cookie = &http.Cookie{
 				Name:  "connect.sid",
-				Value: IdCookieVal,
+				Value: idCookieVal,
 			}
 		}
 	}
@@ -99,8 +99,8 @@ func Execute() {
 
 func init() {
 	rootCmd.PersistentFlags().StringVarP(&proxyURL, "proxy", "x", "", "Specify the proxy url")
-	rootCmd.PersistentFlags().Var(&IdCookieName, "cookie_name", "Either \"substack.sid\" or \"connect.sid\", based on the cookie you have (required for private newsletters)")
-	rootCmd.PersistentFlags().StringVar(&IdCookieVal, "cookie_val", "", "The substack.sid/connect.sid cookie value (required for private newsletters)")
+	rootCmd.PersistentFlags().Var(&idCookieName, "cookie_name", "Either \"substack.sid\" or \"connect.sid\", based on the cookie you have (required for private newsletters)")
+	rootCmd.PersistentFlags().StringVar(&idCookieVal, "cookie_val", "", "The substack.sid/connect.sid cookie value (required for private newsletters)")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose output")
 	rootCmd.PersistentFlags().IntVarP(&ratePerSecond, "rate", "r", lib.DefaultRatePerSecond, "Specify the rate of requests per second")
 	rootCmd.PersistentFlags().StringVar(&beforeDate, "before", "", "Download posts published before this date (format: YYYY-MM-DD)")
