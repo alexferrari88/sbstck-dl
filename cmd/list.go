@@ -40,8 +40,6 @@ var (
 )
 
 func init() {
-	rootCmd.AddCommand(listCmd)
-
 	listCmd.Flags().StringVarP(&pubUrl, "url", "u", "", "Specify the Substack url")
 	listCmd.MarkFlagRequired("url")
 }

@@ -108,6 +108,10 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&beforeDate, "before", "", "Download posts published before this date (format: YYYY-MM-DD)")
 	rootCmd.PersistentFlags().StringVar(&afterDate, "after", "", "Download posts published after this date (format: YYYY-MM-DD)")
 	rootCmd.MarkFlagsRequiredTogether("cookie_name", "cookie_val")
+
+	rootCmd.AddCommand(downloadCmd)
+	rootCmd.AddCommand(listCmd)
+	rootCmd.AddCommand(versionCmd)
 }
 
 func makeDateFilterFunc(beforeDate string, afterDate string) lib.DateFilterFunc {

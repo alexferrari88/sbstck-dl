@@ -114,7 +114,6 @@ var (
 )
 
 func init() {
-	rootCmd.AddCommand(downloadCmd)
 	downloadCmd.Flags().StringVarP(&downloadUrl, "url", "u", "", "Specify the Substack url")
 	downloadCmd.Flags().StringVarP(&format, "format", "f", "html", "Specify the output format (options: \"html\", \"md\", \"txt\"")
 	downloadCmd.Flags().StringVarP(&outputFolder, "output", "o", ".", "Specify the download directory")
