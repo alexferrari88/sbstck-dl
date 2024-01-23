@@ -12,7 +12,7 @@ var versionCmd = &cobra.Command{
 	Short: "Print the version number of sbstck-dl",
 	Long:  `Display the current version of the app.`,
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println("sbstck-dl v0.3.1")
+		fmt.Println("sbstck-dl v0.3.2")
 	},
 }
 

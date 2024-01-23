@@ -44,6 +44,10 @@ Use "sbstck-dl [command] --help" for more information about a command.
 
 You can provide the url of a single post or the main url of the Substack you want to download.
 
+By providing the main URL of a Substack, the downloader will download all the posts of the archive.
+
+When downloading the full archive, if the downloader is interrupted, at the next execution it will resume the download of the remaining posts.
+
 ```bash
 Usage:
   sbstck-dl download [flags]
@@ -104,7 +108,6 @@ sbstck-dl download --url https://example.substack.com --cookie_name substack.sid
 
 ## TODO
 
-- [ ] Implementing resuming downloads
 - [ ] Improve retry logic
 - [ ] Implement loading from config file
 - [ ] Add support for downloading media
@@ -113,3 +116,4 @@ sbstck-dl download --url https://example.substack.com --cookie_name substack.sid
 - [x] Add documentation
 - [x] Add support for private newsletters
 - [x] Implement filtering by date
+- [x] Implement resuming downloads

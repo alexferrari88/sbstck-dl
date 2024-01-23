@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"net/url"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -62,15 +63,34 @@ var (
 				var downloadedPostsCount int
 				dateFilterfunc := makeDateFilterFunc(beforeDate, afterDate)
 				urls, err := extractor.GetAllPostsURLs(ctx, downloadUrl, dateFilterfunc)
+				urlsCount := len(urls)
 				if err != nil {
 					log.Fatalln(err)
 				}
+				if urlsCount == 0 {
+					if verbose {
+						fmt.Println("No posts found, exiting...")
+					}
+					return
+				}
 				if verbose {
-					fmt.Printf("Found %d posts\n", len(urls))
+					fmt.Printf("Found %d posts\n", urlsCount)
 				}
 				if dryRun {
-					fmt.Printf("Found %d posts\n", len(urls))
+					fmt.Printf("Found %d posts\n", urlsCount)
 					fmt.Println("Dry run, exiting...")
+					return
+				}
+				urls, err = filterExistingPosts(urls, outputFolder, format)
+				if err != nil {
+					if verbose {
+						fmt.Println("Error filtering existing posts:", err)
+					}
+				}
+				if len(urls) == 0 {
+					if verbose {
+						fmt.Println("No new posts found, exiting...")
+					}
 					return
 				}
 				bar := progressbar.NewOptions(len(urls),
@@ -153,4 +173,29 @@ func parseURL(toTest string) (*url.URL, error) {
 
 func makePath(post lib.Post, outputFolder string, format string) string {
 	return fmt.Sprintf("%s/%s_%s.%s", outputFolder, convertDateTime(post.PostDate), post.Slug, format)
+}
+
+// extractSlug extracts the slug from a Substack post URL
+// e.g. https://example.substack.com/p/this-is-the-post-title -> this-is-the-post-title
+func extractSlug(url string) string {
+	split := strings.Split(url, "/")
+	return split[len(split)-1]
+}
+
+// filterExistingPosts filters out posts that already exist in the output folder.
+// It looks for files whose name ends with the post slug.
+func filterExistingPosts(urls []string, outputFolder string, format string) ([]string, error) {
+	var filtered []string
+	for _, url := range urls {
+		slug := extractSlug(url)
+		path := fmt.Sprintf("%s/%s_%s.%s", outputFolder, "*", slug, format)
+		matches, err := filepath.Glob(path)
+		if err != nil {
+			return urls, err
+		}
+		if len(matches) == 0 {
+			filtered = append(filtered, url)
+		}
+	}
+	return filtered, nil
 }
