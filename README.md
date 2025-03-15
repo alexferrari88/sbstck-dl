@@ -15,6 +15,12 @@ We provide binaries for Linux, MacOS and Windows.
 go install github.com/alexferrari88/sbstck-dl
 ```
 
+Your Go bin directory must be in your PATH. You can add it by adding the following line to your `.bashrc` or `.zshrc`:
+
+```bash
+export PATH=$PATH:$(go env GOPATH)/bin
+```
+
 ## Usage
 
 ```bash
