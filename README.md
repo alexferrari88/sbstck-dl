@@ -108,10 +108,10 @@ sbstck-dl download --url https://example.substack.com --cookie_name substack.sid
 
 ## TODO
 
-- [ ] Improve retry logic
+- [x] Improve retry logic
 - [ ] Implement loading from config file
 - [ ] Add support for downloading media
-- [ ] Add tests
+- [x] Add tests
 - [ ] Add CI
 - [x] Add documentation
 - [x] Add support for private newsletters
