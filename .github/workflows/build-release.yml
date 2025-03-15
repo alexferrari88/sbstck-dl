@@ -16,7 +16,7 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        go-version: [1.24.1]
+        go-version: [1.21.5]
     steps:
       - name: Check out code
         uses: actions/checkout@v4
@@ -39,7 +39,7 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        go-version: [1.24.1]
+        go-version: [1.21.5]
         include:
           - os: ubuntu-latest
             goos: linux
@@ -82,14 +82,26 @@ jobs:
     if: github.event_name == 'release'
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: write  # This is needed for release uploads
     steps:
+      - name: Debug event info
+        run: |
+          echo "Event name: ${{ github.event_name }}"
+          echo "Event type: ${{ github.event.action }}"
+          echo "Release tag: ${{ github.event.release.tag_name }}"
+        
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
+      
+      - name: List artifacts
+        run: find artifacts -type f | sort
           
       - name: Upload artifacts to release
         uses: softprops/action-gh-release@v1
         with:
           files: artifacts/**/*
-          token: ${{ secrets.GITHUB_TOKEN }}
+          # GitHub automatically provides this token
+          token: ${{ github.token }}
