@@ -17,17 +17,23 @@ import (
 // DefaultRatePerSecond defines the default request rate per second when creating a new Fetcher.
 const DefaultRatePerSecond = 2
 
+// DefaultBurst defines the default burst size for the rate limiter.
+const DefaultBurst = 5
+
 // defaultRetryAfter specifies the default value for Retry-After header in case of too many requests.
 const defaultRetryAfter = 60
 
 // defaultMaxRetryCount defines the default maximum number of retries for a failed URL fetch.
-const defaultMaxRetryCount = 100
+const defaultMaxRetryCount = 10
 
 // defaultMaxElapsedTime specifies the default maximum elapsed time for the exponential backoff.
 const defaultMaxElapsedTime = 10 * time.Minute
 
 // defaultMaxInterval defines the default maximum interval for the exponential backoff.
 const defaultMaxInterval = 2 * time.Minute
+
+// defaultClientTimeout defines the default timeout for HTTP requests.
+const defaultClientTimeout = 30 * time.Second
 
 // userAgent specifies the User-Agent header value used in HTTP requests.
 const userAgent = "sbstck-dl/0.1"
@@ -38,14 +44,18 @@ type Fetcher struct {
 	RateLimiter *rate.Limiter
 	BackoffCfg  backoff.BackOff
 	Cookie      *http.Cookie
+	MaxWorkers  int
 }
 
 // FetcherOptions holds configurable options for Fetcher.
 type FetcherOptions struct {
 	RatePerSecond int
+	Burst         int
 	ProxyURL      *url.URL
 	BackOffConfig backoff.BackOff
 	Cookie        *http.Cookie
+	Timeout       time.Duration
+	MaxWorkers    int
 }
 
 // FetcherOption defines a function that applies a specific option to FetcherOptions.
@@ -55,6 +65,13 @@ type FetcherOption func(*FetcherOptions)
 func WithRatePerSecond(rate int) FetcherOption {
 	return func(o *FetcherOptions) {
 		o.RatePerSecond = rate
+	}
+}
+
+// WithBurst sets the burst size for the rate limiter.
+func WithBurst(burst int) FetcherOption {
+	return func(o *FetcherOptions) {
+		o.Burst = burst
 	}
 }
 
@@ -81,6 +98,20 @@ func WithCookie(cookie *http.Cookie) FetcherOption {
 	}
 }
 
+// WithTimeout sets the HTTP client timeout.
+func WithTimeout(timeout time.Duration) FetcherOption {
+	return func(o *FetcherOptions) {
+		o.Timeout = timeout
+	}
+}
+
+// WithMaxWorkers sets the maximum number of concurrent workers.
+func WithMaxWorkers(workers int) FetcherOption {
+	return func(o *FetcherOptions) {
+		o.MaxWorkers = workers
+	}
+}
+
 // FetchResult represents the result of a URL fetch operation.
 type FetchResult struct {
 	Url   string
@@ -92,127 +123,153 @@ type FetchResult struct {
 type FetchError struct {
 	TooManyRequests bool
 	RetryAfter      int
+	StatusCode      int
 }
 
-// Error returns the error message for the FetchError, indicating the retry wait time.
+// Error returns the error message for the FetchError.
 func (e *FetchError) Error() string {
-	return fmt.Sprintf("too many requests, retry after %d seconds", e.RetryAfter)
+	if e.TooManyRequests {
+		return fmt.Sprintf("too many requests, retry after %d seconds", e.RetryAfter)
+	}
+	return fmt.Sprintf("HTTP error: status code %d", e.StatusCode)
 }
 
 // NewFetcher creates a new Fetcher with the provided options.
-// If ratePerSecond is 0, the default rate (DefaultRatePerSecond) is used.
-// If b is nil, the default backoff configuration is used.
 func NewFetcher(opts ...FetcherOption) *Fetcher {
 	options := FetcherOptions{
 		RatePerSecond: DefaultRatePerSecond,
+		Burst:         DefaultBurst,
 		BackOffConfig: makeDefaultBackoff(),
+		Timeout:       defaultClientTimeout,
+		MaxWorkers:    10, // Default to 10 workers
 	}
 
 	for _, opt := range opts {
 		opt(&options)
 	}
 
-	transport := http.DefaultTransport
+	transport := http.DefaultTransport.(*http.Transport).Clone()
 	if options.ProxyURL != nil {
-		transport = &http.Transport{Proxy: http.ProxyURL(options.ProxyURL)}
+		transport.Proxy = http.ProxyURL(options.ProxyURL)
 	}
 
-	client := &http.Client{Transport: transport}
+	// Set sensible defaults for transport
+	transport.MaxIdleConns = 100
+	transport.MaxIdleConnsPerHost = options.MaxWorkers
+	transport.MaxConnsPerHost = options.MaxWorkers
+	transport.IdleConnTimeout = 90 * time.Second
+	transport.TLSHandshakeTimeout = 10 * time.Second
+
+	client := &http.Client{
+		Transport: transport,
+		Timeout:   options.Timeout,
+	}
 
 	return &Fetcher{
 		Client:      client,
-		RateLimiter: rate.NewLimiter(rate.Limit(options.RatePerSecond), 1),
+		RateLimiter: rate.NewLimiter(rate.Limit(options.RatePerSecond), options.Burst),
 		BackoffCfg:  options.BackOffConfig,
 		Cookie:      options.Cookie,
+		MaxWorkers:  options.MaxWorkers,
 	}
 }
 
 // FetchURLs concurrently fetches the specified URLs and returns a channel to receive the FetchResults.
-// The returned channel will be closed once all fetch operations are completed.
 func (f *Fetcher) FetchURLs(ctx context.Context, urls []string) <-chan FetchResult {
-	results := make(chan FetchResult, len(urls))
-	ctx, ctxCancelFn := context.WithCancel(ctx)
-	defer ctxCancelFn()
-	var eg errgroup.Group
+	// Use a smaller buffer to reduce memory footprint
+	results := make(chan FetchResult, min(len(urls), f.MaxWorkers*2))
 
-	sem := make(chan struct{}, f.RateLimiter.Burst()) // worker pool
+	g, ctx := errgroup.WithContext(ctx)
+
+	// Use a semaphore to limit concurrency
+	sem := make(chan struct{}, f.MaxWorkers)
 
 	for _, u := range urls {
-		u := u // https://golang.org/doc/faq#closures_and_goroutines
-		eg.Go(func() error {
-			sem <- struct{}{}
-			defer func() { <-sem }()
-			body, err := f.FetchURL(ctx, u)
+		u := u // Capture the variable
+		g.Go(func() error {
 			select {
+			case sem <- struct{}{}: // Acquire semaphore
+				defer func() { <-sem }() // Release semaphore
 			case <-ctx.Done():
 				return ctx.Err()
-			default:
-				results <- FetchResult{Url: u, Body: body, Error: err}
+			}
+
+			body, err := f.FetchURL(ctx, u)
+
+			select {
+			case results <- FetchResult{Url: u, Body: body, Error: err}:
 				return nil
+			case <-ctx.Done():
+				// Close body if context was canceled to prevent leaks
+				if body != nil {
+					body.Close()
+				}
+				return ctx.Err()
 			}
 		})
 	}
 
+	// Close the results channel when all goroutines complete
 	go func() {
-		eg.Wait()
+		g.Wait()
 		close(results)
 	}()
 
 	return results
 }
 
-// FetchURL fetches the specified URL and returns the response body as io.ReadCloser and any encountered error.
-// It uses rate limiting and retry mechanisms to handle rate limits and transient failures.
+// FetchURL fetches the specified URL with retries and rate limiting.
 func (f *Fetcher) FetchURL(ctx context.Context, url string) (io.ReadCloser, error) {
-
 	var body io.ReadCloser
 	var err error
 	var retryCounter int
-	var nextRetryWait time.Duration
 
 	operation := func() error {
 		if retryCounter >= defaultMaxRetryCount {
-			err = fmt.Errorf("max retry count reached for URL: %s", url)
-			return nil
+			return backoff.Permanent(fmt.Errorf("max retry count reached for URL: %s", url))
 		}
-		if nextRetryWait > 0 {
-			time.Sleep(nextRetryWait)
-		}
+
 		err = f.RateLimiter.Wait(ctx) // Use rate limiter
 		if err != nil {
-			return err // Could be a context cancellation or error in limiter
+			return backoff.Permanent(err) // Context cancellation or rate limiter error
 		}
+
 		body, err = f.fetch(ctx, url)
 		if err != nil {
-			retryCounter++
-		}
-		return err
-	}
-
-	notify := func(err error, d time.Duration) {
-		if respErr, ok := err.(*FetchError); ok && respErr.TooManyRequests {
-			nextRetryWait = time.Duration(respErr.RetryAfter) * time.Second
-			if retryCounter > 0 {
-				nextRetryWait *= time.Duration(retryCounter)
+			// If it's a fetch error that should be retried
+			if fetchErr, ok := err.(*FetchError); ok && fetchErr.TooManyRequests {
+				retryCounter++
+				return err
 			}
+			// For other errors, don't retry
+			return backoff.Permanent(err)
 		}
+		return nil
 	}
 
-	backoff.RetryNotify(operation, f.BackoffCfg, notify)
+	// Use backoff with notification for logging
+	err = backoff.RetryNotify(
+		operation,
+		f.BackoffCfg,
+		func(err error, d time.Duration) {
+			// This could be connected to a logger
+			_ = err // Avoid unused variable error
+		},
+	)
 
 	return body, err
 }
 
-// fetch performs the actual HTTP GET request to the specified URL and returns the response body and any encountered error.
-// It checks for too many requests (status code 429) and handles it by returning a FetchError.
+// fetch performs the actual HTTP GET request.
 func (f *Fetcher) fetch(ctx context.Context, url string) (io.ReadCloser, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
 	}
+
 	req.Header.Set("User-Agent", userAgent)
 
-	// Add cookie to the request if it's not nil
+	// Add cookie if available
 	if f.Cookie != nil {
 		req.AddCookie(f.Cookie)
 	}
@@ -222,30 +279,47 @@ func (f *Fetcher) fetch(ctx context.Context, url string) (io.ReadCloser, error) 
 		return nil, err
 	}
 
-	if res.StatusCode == http.StatusTooManyRequests {
-		retryAfter := defaultRetryAfter
-		if retryAfterStr := res.Header.Get("Retry-After"); retryAfterStr != "" {
-			retryAfter, err = strconv.Atoi(retryAfterStr)
-			if err != nil {
-				return nil, fmt.Errorf("invalid Retry-After header: %v", err)
+	// Handle non-success status codes
+	if res.StatusCode != http.StatusOK {
+		// Always close the body for non-200 responses
+		defer res.Body.Close()
+
+		if res.StatusCode == http.StatusTooManyRequests {
+			retryAfter := defaultRetryAfter
+			if retryAfterStr := res.Header.Get("Retry-After"); retryAfterStr != "" {
+				if seconds, err := strconv.Atoi(retryAfterStr); err == nil {
+					retryAfter = seconds
+				}
+			}
+			return nil, &FetchError{
+				TooManyRequests: true,
+				RetryAfter:      retryAfter,
+				StatusCode:      res.StatusCode,
 			}
 		}
-		return nil, &FetchError{TooManyRequests: true, RetryAfter: retryAfter}
-	}
 
-	if res.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("unexpected status code: %d", res.StatusCode)
+		return nil, &FetchError{
+			StatusCode: res.StatusCode,
+		}
 	}
 
 	return res.Body, nil
 }
 
-// makeDefaultBackoff creates and returns the default exponential backoff configuration.
+// makeDefaultBackoff creates the default exponential backoff configuration.
 func makeDefaultBackoff() backoff.BackOff {
 	backOffCfg := backoff.NewExponentialBackOff()
 	backOffCfg.MaxElapsedTime = defaultMaxElapsedTime
 	backOffCfg.MaxInterval = defaultMaxInterval
-	backOffCfg.Multiplier = 2.0
+	backOffCfg.Multiplier = 1.5 // Reduced from 2.0 for more gradual backoff
 
 	return backOffCfg
+}
+
+// min returns the smaller of two integers.
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
