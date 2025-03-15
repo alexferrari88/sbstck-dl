@@ -27,7 +27,6 @@ func (r *RawPost) ToPost() (Post, error) {
 	err := json.Unmarshal([]byte(r.str), &wrapper)
 	if err != nil {
 		return Post{}, err
-
 	}
 	return wrapper.Post, nil
 }
@@ -45,23 +44,24 @@ type Post struct {
 	CoverImage       string `json:"cover_image"`
 	Description      string `json:"description"`
 	WordCount        int    `json:"wordcount"`
-	//PostTags         []string `json:"postTags"`
-	Title    string `json:"title"`
-	BodyHTML string `json:"body_html"`
+	Title            string `json:"title"`
+	BodyHTML         string `json:"body_html"`
 }
+
+// Static converter instance to avoid recreating it for each conversion
+var mdConverter = md.NewConverter("", true, nil)
 
 // ToMD converts the Post's HTML body to Markdown format.
 func (p *Post) ToMD(withTitle bool) (string, error) {
-	var title string
 	if withTitle {
-		title = fmt.Sprintf("# %s\n\n", p.Title)
+		body, err := mdConverter.ConvertString(p.BodyHTML)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("# %s\n\n%s", p.Title, body), nil
 	}
-	converter := md.NewConverter("", true, nil)
-	body, err := converter.ConvertString(p.BodyHTML)
-	if err != nil {
-		return "", err
-	}
-	return title + body, nil
+
+	return mdConverter.ConvertString(p.BodyHTML)
 }
 
 // ToText converts the Post's HTML body to plain text format.
@@ -89,42 +89,32 @@ func (p *Post) ToJSON() (string, error) {
 	return string(b), nil
 }
 
-// WriteToFile writes the Post's content to a file in the specified format (html, md, or txt).
-func (p *Post) WriteToFile(path string, format string) error {
-	err := os.MkdirAll(filepath.Dir(path), 0755)
-	if err != nil {
-		return err
-	}
-	f, err := os.Create(path)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	var content string
+// contentForFormat returns the content of a post in the specified format.
+func (p *Post) contentForFormat(format string, withTitle bool) (string, error) {
 	switch format {
 	case "html":
-		content = p.ToHTML(true)
+		return p.ToHTML(withTitle), nil
 	case "md":
-		content, err = p.ToMD(true)
-		if err != nil {
-			return err
-		}
+		return p.ToMD(withTitle)
 	case "txt":
-		content = p.ToText(true)
+		return p.ToText(withTitle), nil
 	default:
-		return fmt.Errorf("unknown format: %s", format)
+		return "", fmt.Errorf("unknown format: %s", format)
 	}
-	_, err = f.WriteString(content)
+}
+
+// WriteToFile writes the Post's content to a file in the specified format (html, md, or txt).
+func (p *Post) WriteToFile(path string, format string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return err
+	}
+
+	content, err := p.contentForFormat(format, true)
 	if err != nil {
 		return err
 	}
 
-	err = f.Sync()
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return os.WriteFile(path, []byte(content), 0644)
 }
 
 // PostWrapper wraps a Post object for JSON unmarshaling.
@@ -146,66 +136,69 @@ func NewExtractor(f *Fetcher) *Extractor {
 	return &Extractor{fetcher: f}
 }
 
-// findScriptContent finds the content of the <script> tag containing JSON data.
-func findScriptContent(doc *goquery.Document) string {
-	scriptContent := ""
+// extractJSONString finds and extracts the JSON data from script content.
+// This optimized version reduces string operations.
+func extractJSONString(doc *goquery.Document) (string, error) {
+	var jsonString string
+	var found bool
+
 	doc.Find("script").EachWithBreak(func(i int, s *goquery.Selection) bool {
-		if strings.Contains(s.Text(), "window._preloads") && strings.Contains(s.Text(), "JSON.parse(") {
-			scriptContent = s.Text()
+		content := s.Text()
+		if strings.Contains(content, "window._preloads") && strings.Contains(content, "JSON.parse(") {
+			start := strings.Index(content, "JSON.parse(\"")
+			if start == -1 {
+				return true
+			}
+			start += len("JSON.parse(\"")
+
+			end := strings.LastIndex(content, "\")")
+			if end == -1 || start >= end {
+				return true
+			}
+
+			jsonString = content[start:end]
+			found = true
 			return false
 		}
 		return true
 	})
-	return scriptContent
-}
 
-func extractJSONString(scriptContent string) (string, error) {
-	start := strings.Index(scriptContent, "JSON.parse(\"")
-	end := strings.LastIndex(scriptContent, "\")")
-
-	if start == -1 || end == -1 || start >= end {
+	if !found {
 		return "", errors.New("failed to extract JSON string")
 	}
 
-	return scriptContent[start+len("JSON.parse(\"") : end], nil
+	return jsonString, nil
 }
 
 func (e *Extractor) ExtractPost(ctx context.Context, pageUrl string) (Post, error) {
 	// fetch page HTML content
 	body, err := e.fetcher.FetchURL(ctx, pageUrl)
 	if err != nil {
-		return Post{}, fmt.Errorf("failed to fetch page: %s", err)
+		return Post{}, fmt.Errorf("failed to fetch page: %w", err)
 	}
 	defer body.Close()
 
 	doc, err := goquery.NewDocumentFromReader(body)
 	if err != nil {
-		return Post{}, fmt.Errorf("failed to fetch page: %s", err)
-
+		return Post{}, fmt.Errorf("failed to parse HTML: %w", err)
 	}
 
-	scriptContent := findScriptContent(doc)
-
-	if scriptContent == "" {
-		return Post{}, fmt.Errorf("failed to fetch page: script content not found")
-	}
-
-	jsonString, err := extractJSONString(scriptContent)
+	jsonString, err := extractJSONString(doc)
 	if err != nil {
-		return Post{}, fmt.Errorf("failed to fetch page: %s", err)
+		return Post{}, fmt.Errorf("failed to extract post data: %w", err)
 	}
 
-	// jsonString is a stringified JSON string. Convert it to a normal JSON string
+	// Unescape the JSON string directly
 	var rawJSON RawPost
-	err = json.Unmarshal([]byte("\""+jsonString+"\""), &rawJSON.str) //json.NewEncoder(&rawJSON).Encode([]byte("\"" + jsonString + "\""))
+	err = json.Unmarshal([]byte("\""+jsonString+"\""), &rawJSON.str)
 	if err != nil {
-		return Post{}, fmt.Errorf("failed to fetch page: %s", err)
+		return Post{}, fmt.Errorf("failed to unescape JSON: %w", err)
 	}
 
-	// Now convert the normal JSON string to a Go object
+	// Convert to a Go object
 	p, err := rawJSON.ToPost()
 	if err != nil {
-		return Post{}, fmt.Errorf("failed to fetch page: %s", err)
+		return Post{}, fmt.Errorf("failed to parse post data: %w", err)
 	}
 
 	return p, nil
@@ -230,14 +223,17 @@ func (e *Extractor) GetAllPostsURLs(ctx context.Context, pubUrl string, f DateFi
 		return nil, err
 	}
 	defer body.Close()
-	// the sitemap is an XML file with a list of URLs
-	// we are interested in the <loc> tags only if the URL contains "/p/"
+
+	// Parse the XML
 	doc, err := goquery.NewDocumentFromReader(body)
 	if err != nil {
 		return nil, err
 	}
 
-	urls := []string{}
+	// Pre-allocate a reasonable size for URLs
+	// This avoids multiple slice reallocations as we append
+	urls := make([]string, 0, 100)
+
 	doc.Find("url").EachWithBreak(func(i int, s *goquery.Selection) bool {
 		// Check if the context has been cancelled
 		select {
@@ -245,19 +241,22 @@ func (e *Extractor) GetAllPostsURLs(ctx context.Context, pubUrl string, f DateFi
 			return false
 		default:
 		}
+
 		urlSel := s.Find("loc")
-		lastmodSel := s.Find("lastmod")
 		url := urlSel.Text()
-		lastmod := lastmodSel.Text()
 		if !strings.Contains(url, "/p/") {
 			return true
 		}
-		// if the date filter function is not nil, check if the post date complies with the filter
-		if f != nil && !f(lastmod) {
-			return true
-		}
-		urls = append(urls, url)
 
+		// Only find lastmod if we have a filter
+		if f != nil {
+			lastmod := s.Find("lastmod").Text()
+			if !f(lastmod) {
+				return true
+			}
+		}
+
+		urls = append(urls, url)
 		return true
 	})
 
@@ -269,22 +268,54 @@ type ExtractResult struct {
 	Err  error
 }
 
+// ExtractAllPosts extracts all posts from the given URLs using a worker pool pattern
+// to limit concurrency and avoid overwhelming system resources.
 func (e *Extractor) ExtractAllPosts(ctx context.Context, urls []string) <-chan ExtractResult {
-	ch := make(chan ExtractResult, len(urls))
+	resultCh := make(chan ExtractResult, len(urls))
 
 	go func() {
-		var wg sync.WaitGroup
-		wg.Add(len(urls))
+		defer close(resultCh)
+
+		// Create a channel for the URLs
+		urlCh := make(chan string, len(urls))
+
+		// Fill the URL channel
 		for _, u := range urls {
-			go func(url string) {
-				defer wg.Done()
-				post, err := e.ExtractPost(ctx, url)
-				ch <- ExtractResult{Post: post, Err: err}
-			}(u)
+			urlCh <- u
 		}
+		close(urlCh)
+
+		// Limit concurrency - the number of workers is capped at 10 or the number of URLs, whichever is smaller
+		workerCount := 10
+		if len(urls) < workerCount {
+			workerCount = len(urls)
+		}
+
+		// Create a WaitGroup to wait for all workers to finish
+		var wg sync.WaitGroup
+		wg.Add(workerCount)
+
+		// Start the workers
+		for i := 0; i < workerCount; i++ {
+			go func() {
+				defer wg.Done()
+
+				for url := range urlCh {
+					select {
+					case <-ctx.Done():
+						// Context cancelled, stop processing
+						return
+					default:
+						post, err := e.ExtractPost(ctx, url)
+						resultCh <- ExtractResult{Post: post, Err: err}
+					}
+				}
+			}()
+		}
+
+		// Wait for all workers to finish
 		wg.Wait()
-		close(ch)
 	}()
 
-	return ch
+	return resultCh
 }
