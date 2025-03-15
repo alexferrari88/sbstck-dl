@@ -112,7 +112,7 @@ sbstck-dl download --url https://example.substack.com --cookie_name substack.sid
 - [ ] Implement loading from config file
 - [ ] Add support for downloading media
 - [x] Add tests
-- [ ] Add CI
+- [x] Add CI
 - [x] Add documentation
 - [x] Add support for private newsletters
 - [x] Implement filtering by date
