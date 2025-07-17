@@ -300,8 +300,14 @@ func (id *ImageDownloader) generateSafeFilename(imageURL string) (string, error)
 		}
 	}
 
-	// Clean filename - remove invalid characters
+	// Clean filename - remove invalid characters (but preserve structure)
+	// Only replace invalid filesystem characters, not dots
 	filename = regexp.MustCompile(`[<>:"/\\|?*]`).ReplaceAllString(filename, "_")
+	
+	// Ensure we have a valid filename after cleaning
+	if filename == "" || filename == "_" {
+		filename = "image.jpg"
+	}
 	
 	// Ensure filename is not too long
 	if len(filename) > 200 {
@@ -357,6 +363,9 @@ func (id *ImageDownloader) updateHTMLWithLocalPaths(htmlContent string, urlToLoc
 		if err != nil {
 			relPath = localPath // fallback to absolute path
 		}
+
+		// Convert to forward slashes for HTML (web standard) - fixes Windows path separator issue
+		relPath = filepath.ToSlash(relPath)
 
 		// Replace URL in various contexts
 		updatedHTML = strings.ReplaceAll(updatedHTML, originalURL, relPath)
