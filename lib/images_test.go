@@ -430,8 +430,8 @@ func TestUpdateHTMLWithLocalPaths(t *testing.T) {
 <img src="https://example.com/image1.jpg" alt="Same image again">`
 	
 	urlToLocalPath := map[string]string{
-		"https://example.com/image1.jpg": "/output/images/post/image1.jpg",
-		"https://example.com/image2.png": "/output/images/post/image2.png",
+		"https://example.com/image1.jpg": filepath.Join("/output", "images", "post", "image1.jpg"),
+		"https://example.com/image2.png": filepath.Join("/output", "images", "post", "image2.png"),
 	}
 	
 	updatedHTML := downloader.updateHTMLWithLocalPaths(originalHTML, urlToLocalPath)

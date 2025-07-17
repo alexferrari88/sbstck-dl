@@ -286,7 +286,7 @@ func (id *ImageDownloader) generateSafeFilename(imageURL string) (string, error)
 	filename := filepath.Base(parsedURL.Path)
 	
 	// If no valid filename, generate one from URL patterns
-	if filename == "" || filename == "/" || filename == "." || filename == "\\" {
+	if filename == "" || filename == "/" || filename == "." {
 		filename = "" // Reset to force fallback logic
 		
 		// Try to extract from the URL patterns
