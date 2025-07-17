@@ -285,38 +285,45 @@ func (id *ImageDownloader) generateSafeFilename(imageURL string) (string, error)
 	// Extract filename from URL path
 	filename := filepath.Base(parsedURL.Path)
 	
-	// If no filename or it's just "/", generate one from URL
-	if filename == "" || filename == "/" || filename == "." {
+	// If no valid filename, generate one from URL patterns
+	if filename == "" || filename == "/" || filename == "." || filename == "\\" {
+		filename = "" // Reset to force fallback logic
+		
 		// Try to extract from the URL patterns
 		if strings.Contains(imageURL, "substack") {
 			// Try to extract the image ID from Substack URLs
 			if match := regexp.MustCompile(`([a-f0-9-]{36})_(\d+x\d+)\.(jpeg|jpg|png|webp)`).FindStringSubmatch(imageURL); len(match) > 0 {
 				filename = fmt.Sprintf("%s_%s.%s", match[1][:8], match[2], match[3])
-			} else {
-				filename = "image.jpg" // fallback
 			}
-		} else {
-			filename = "image.jpg" // fallback
+		}
+		
+		// If still no filename, use default
+		if filename == "" {
+			filename = "image.jpg"
 		}
 	}
 
 	// Clean filename - remove invalid characters (but preserve structure)
-	// Only replace invalid filesystem characters, not dots
-	filename = regexp.MustCompile(`[<>:"/\\|?*]`).ReplaceAllString(filename, "_")
+	// Only replace invalid filesystem characters
+	cleanedFilename := regexp.MustCompile(`[<>:"/\\|?*]`).ReplaceAllString(filename, "_")
 	
 	// Ensure we have a valid filename after cleaning
-	if filename == "" || filename == "_" {
-		filename = "image.jpg"
+	if cleanedFilename == "" || cleanedFilename == "_" || cleanedFilename == "__" {
+		cleanedFilename = "image.jpg"
 	}
 	
 	// Ensure filename is not too long
-	if len(filename) > 200 {
-		ext := filepath.Ext(filename)
-		name := strings.TrimSuffix(filename, ext)
-		filename = name[:200-len(ext)] + ext
+	if len(cleanedFilename) > 200 {
+		ext := filepath.Ext(cleanedFilename)
+		name := strings.TrimSuffix(cleanedFilename, ext)
+		if len(ext) < 200 {
+			cleanedFilename = name[:200-len(ext)] + ext
+		} else {
+			cleanedFilename = "image.jpg"
+		}
 	}
 
-	return filename, nil
+	return cleanedFilename, nil
 }
 
 // getImageFormat determines image format from filename
@@ -364,8 +371,9 @@ func (id *ImageDownloader) updateHTMLWithLocalPaths(htmlContent string, urlToLoc
 			relPath = localPath // fallback to absolute path
 		}
 
-		// Convert to forward slashes for HTML (web standard) - fixes Windows path separator issue
-		relPath = filepath.ToSlash(relPath)
+		// Always ensure forward slashes for HTML (web standard)
+		// Convert any backslashes to forward slashes regardless of platform
+		relPath = strings.ReplaceAll(relPath, "\\", "/")
 
 		// Replace URL in various contexts
 		updatedHTML = strings.ReplaceAll(updatedHTML, originalURL, relPath)
