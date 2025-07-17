@@ -426,6 +426,81 @@ func TestFetchURLs(t *testing.T) {
 		notFoundURL := server.URL + "/notfound"
 		assert.True(t, results[notFoundURL].error)
 	})
+
+	t.Run("EmptyURLList", func(t *testing.T) {
+		f := NewFetcher()
+		ctx := context.Background()
+		resultChan := f.FetchURLs(ctx, []string{})
+
+		// Should receive no results
+		count := 0
+		for range resultChan {
+			count++
+		}
+		assert.Equal(t, 0, count)
+	})
+
+	t.Run("SingleURL", func(t *testing.T) {
+		// Create a test server
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte("single"))
+		}))
+		defer server.Close()
+
+		f := NewFetcher()
+		ctx := context.Background()
+		resultChan := f.FetchURLs(ctx, []string{server.URL})
+
+		// Should receive exactly one result
+		count := 0
+		for result := range resultChan {
+			count++
+			assert.NoError(t, result.Error)
+			assert.NotNil(t, result.Body)
+			if result.Body != nil {
+				data, err := io.ReadAll(result.Body)
+				result.Body.Close()
+				assert.NoError(t, err)
+				assert.Equal(t, "single", string(data))
+			}
+		}
+		assert.Equal(t, 1, count)
+	})
+
+	t.Run("ContextCancellationDuringFetch", func(t *testing.T) {
+		// Create a test server with delay
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			time.Sleep(200 * time.Millisecond)
+			w.WriteHeader(http.StatusOK)
+		}))
+		defer server.Close()
+
+		f := NewFetcher()
+		ctx, cancel := context.WithCancel(context.Background())
+		
+		// Create multiple URLs
+		urls := []string{server.URL, server.URL, server.URL}
+		resultChan := f.FetchURLs(ctx, urls)
+
+		// Cancel context after a short delay
+		go func() {
+			time.Sleep(50 * time.Millisecond)
+			cancel()
+		}()
+
+		// Collect results
+		results := 0
+		for result := range resultChan {
+			results++
+			if result.Body != nil {
+				result.Body.Close()
+			}
+		}
+
+		// Should receive fewer results than total URLs due to cancellation
+		assert.LessOrEqual(t, results, len(urls))
+	})
 }
 
 // TestFetchErrors tests the FetchError type

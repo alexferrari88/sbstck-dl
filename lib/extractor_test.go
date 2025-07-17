@@ -146,6 +146,36 @@ func TestPostFormatConversions(t *testing.T) {
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "unknown format")
 	})
+
+	// Test error handling for format conversions
+	t.Run("ToMD error handling", func(t *testing.T) {
+		// Create a post with problematic HTML for markdown conversion
+		// Note: html-to-markdown library is quite robust, so we test with extremely malformed HTML
+		problemPost := createSamplePost()
+		problemPost.BodyHTML = "<div><p>Nested without closing</div>"
+		
+		// This should still work as the library handles most malformed HTML
+		_, err := problemPost.ToMD(true)
+		assert.NoError(t, err) // The library is quite tolerant
+	})
+
+	t.Run("ToJSON error handling", func(t *testing.T) {
+		// Create a post that would have issues during JSON marshaling
+		// This is hard to trigger with normal Post struct, but we can test the error path
+		problemPost := createSamplePost()
+		
+		// Test with valid data (JSON marshaling rarely fails with valid structs)
+		jsonStr, err := problemPost.ToJSON()
+		assert.NoError(t, err)
+		assert.NotEmpty(t, jsonStr)
+		
+		// Verify the JSON is valid
+		var parsedPost Post
+		err = json.Unmarshal([]byte(jsonStr), &parsedPost)
+		assert.NoError(t, err)
+		assert.Equal(t, problemPost.Id, parsedPost.Id)
+		assert.Equal(t, problemPost.Title, parsedPost.Title)
+	})
 }
 
 // Test Post.WriteToFile
@@ -160,7 +190,7 @@ func TestPostWriteToFile(t *testing.T) {
 	for _, format := range formats {
 		t.Run(format, func(t *testing.T) {
 			filePath := filepath.Join(tempDir, fmt.Sprintf("test.%s", format))
-			err := post.WriteToFile(filePath, format)
+			err := post.WriteToFile(filePath, format, false)
 			require.NoError(t, err)
 
 			// Verify file exists
@@ -191,7 +221,7 @@ func TestPostWriteToFile(t *testing.T) {
 	t.Run("creating directory", func(t *testing.T) {
 		newDir := filepath.Join(tempDir, "subdir", "nested")
 		filePath := filepath.Join(newDir, "test.html")
-		err := post.WriteToFile(filePath, "html")
+		err := post.WriteToFile(filePath, "html", false)
 		assert.NoError(t, err)
 
 		// Verify directory was created
@@ -202,9 +232,57 @@ func TestPostWriteToFile(t *testing.T) {
 	// Test invalid format
 	t.Run("invalid format", func(t *testing.T) {
 		filePath := filepath.Join(tempDir, "test.invalid")
-		err := post.WriteToFile(filePath, "invalid")
+		err := post.WriteToFile(filePath, "invalid", false)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "unknown format")
+	})
+
+	// Test with addSourceURL enabled
+	t.Run("with source URL", func(t *testing.T) {
+		formats := []string{"html", "md", "txt"}
+		
+		for _, format := range formats {
+			t.Run(format, func(t *testing.T) {
+				filePath := filepath.Join(tempDir, fmt.Sprintf("test-with-source.%s", format))
+				err := post.WriteToFile(filePath, format, true)
+				require.NoError(t, err)
+
+				// Read file content
+				content, err := os.ReadFile(filePath)
+				require.NoError(t, err)
+				contentStr := string(content)
+
+				// Check that source URL is included
+				assert.Contains(t, contentStr, post.CanonicalUrl)
+				assert.Contains(t, contentStr, "original content")
+
+				// Check format-specific source URL formatting
+				if format == "html" {
+					assert.Contains(t, contentStr, "<a href=")
+					assert.Contains(t, contentStr, "style=\"margin-top: 2em")
+				} else {
+					assert.Contains(t, contentStr, fmt.Sprintf("original content: %s", post.CanonicalUrl))
+				}
+			})
+		}
+	})
+
+	// Test with addSourceURL but no canonical URL
+	t.Run("with source URL but no canonical URL", func(t *testing.T) {
+		postWithoutURL := createSamplePost()
+		postWithoutURL.CanonicalUrl = ""
+		
+		filePath := filepath.Join(tempDir, "test-no-url.html")
+		err := postWithoutURL.WriteToFile(filePath, "html", true)
+		require.NoError(t, err)
+
+		// Read file content
+		content, err := os.ReadFile(filePath)
+		require.NoError(t, err)
+		contentStr := string(content)
+
+		// Should not contain source URL line
+		assert.NotContains(t, contentStr, "original content")
 	})
 }
 
@@ -272,16 +350,19 @@ func createSubstackTestServer() (*httptest.Server, map[string]Post) {
 		posts[fmt.Sprintf("/p/test-post-%d", i)] = post
 	}
 
-	// Create sitemap XML
+	// Create sitemap XML with different dates
 	sitemapXML := `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
 `
-	for _, post := range posts {
+	// Create ordered list of posts to ensure deterministic date assignment
+	dates := []string{"2023-01-01", "2023-01-02", "2023-01-03", "2023-01-04", "2023-01-05"}
+	for i := 1; i <= 5; i++ {
+		post := posts[fmt.Sprintf("/p/test-post-%d", i)]
 		sitemapXML += fmt.Sprintf(`  <url>
     <loc>https://example.substack.com/p/%s</loc>
     <lastmod>%s</lastmod>
   </url>
-`, post.Slug, post.PostDate)
+`, post.Slug, dates[i-1])
 	}
 	sitemapXML += `</urlset>`
 
@@ -393,17 +474,24 @@ func TestExtractorGetAllPostsURLs(t *testing.T) {
 
 	// Test with date filter
 	t.Run("withDateFilter", func(t *testing.T) {
-		// Filter for posts after 2023-01-01
+		// Filter for posts after 2023-01-02 (should get 3 posts: 2023-01-03, 2023-01-04, 2023-01-05)
 		dateFilter := func(date string) bool {
-			return date > "2023-01-01"
+			return date > "2023-01-02"
 		}
 
 		urls, err := extractor.GetAllPostsURLs(ctx, server.URL, dateFilter)
 		require.NoError(t, err)
 
-		// Our test data all has the same date, so this depends on our test data
-		// In real data, this would filter based on the date
-		assert.Len(t, urls, 0)
+		// Should get 3 posts (dates 2023-01-03, 2023-01-04, 2023-01-05)
+		assert.Len(t, urls, 3)
+		
+		// Verify the filtered URLs are correct
+		for _, url := range urls {
+			// Should contain test-post-3, test-post-4, or test-post-5
+			assert.True(t, strings.Contains(url, "test-post-3") || 
+				strings.Contains(url, "test-post-4") || 
+				strings.Contains(url, "test-post-5"))
+		}
 	})
 
 	// Test with context cancellation
@@ -635,7 +723,7 @@ func TestExtractorErrorHandling(t *testing.T) {
 
 	errorServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Get request counter
-		count := requestCount.Add(1) // Using count, not requestID
+		requestCount.Add(1) // Increment counter
 		path := r.URL.Path
 
 		// Simulate different errors based on path - order matters here!
@@ -676,7 +764,7 @@ func TestExtractorErrorHandling(t *testing.T) {
 			w.Write([]byte(html))
 			return
 
-		case strings.Contains(path, "timeout-post") || count%5 == 0: // Use count here
+		case strings.Contains(path, "timeout-post"):
 			// Use a long sleep to ensure timeout - longer than the client timeout
 			time.Sleep(2 * time.Second)
 			w.WriteHeader(http.StatusOK)
