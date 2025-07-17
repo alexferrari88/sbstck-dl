@@ -19,6 +19,7 @@ var (
 	format       string
 	outputFolder string
 	dryRun       bool
+	addSourceURL bool
 	downloadCmd  = &cobra.Command{
 		Use:   "download",
 		Short: "Download individual posts or the entire public archive",
@@ -53,7 +54,10 @@ var (
 					fmt.Printf("Writing post to file %s\n", path)
 				}
 
-				post.WriteToFile(path, format)
+				err = post.WriteToFile(path, format, addSourceURL)
+				if err != nil {
+					log.Printf("Error writing file %s: %v\n", path, err)
+				}
 
 				if verbose {
 					fmt.Println("Done in ", time.Since(startTime))
@@ -122,7 +126,10 @@ var (
 						fmt.Printf("Writing post to file %s\n", path)
 					}
 
-					post.WriteToFile(path, format)
+					err = post.WriteToFile(path, format, addSourceURL)
+					if err != nil {
+						log.Printf("Error writing file %s: %v\n", path, err)
+					}
 				}
 				if verbose {
 					fmt.Println("Downloaded", downloadedPostsCount, "posts, out of", len(urls))
@@ -138,6 +145,7 @@ func init() {
 	downloadCmd.Flags().StringVarP(&format, "format", "f", "html", "Specify the output format (options: \"html\", \"md\", \"txt\"")
 	downloadCmd.Flags().StringVarP(&outputFolder, "output", "o", ".", "Specify the download directory")
 	downloadCmd.Flags().BoolVarP(&dryRun, "dry-run", "d", false, "Enable dry run")
+	downloadCmd.Flags().BoolVar(&addSourceURL, "add-source-url", false, "Add the original post URL at the end of the downloaded file")
 	downloadCmd.MarkFlagRequired("url")
 }
 

@@ -104,7 +104,7 @@ func (p *Post) contentForFormat(format string, withTitle bool) (string, error) {
 }
 
 // WriteToFile writes the Post's content to a file in the specified format (html, md, or txt).
-func (p *Post) WriteToFile(path string, format string) error {
+func (p *Post) WriteToFile(path string, format string, addSourceURL bool) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return err
 	}
@@ -112,6 +112,16 @@ func (p *Post) WriteToFile(path string, format string) error {
 	content, err := p.contentForFormat(format, true)
 	if err != nil {
 		return err
+	}
+
+	if addSourceURL && p.CanonicalUrl != "" {
+		sourceLine := fmt.Sprintf("\n\noriginal content: %s", p.CanonicalUrl) // Add separation
+
+		// Adjust formatting slightly for HTML
+		if format == "html" {
+			sourceLine = fmt.Sprintf("<p style=\"margin-top: 2em; font-size: small; color: grey;\">original content: <a href=\"%s\">%s</a></p>", p.CanonicalUrl, p.CanonicalUrl)
+		}
+		content += sourceLine
 	}
 
 	return os.WriteFile(path, []byte(content), 0644)

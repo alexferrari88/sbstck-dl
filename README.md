@@ -59,6 +59,7 @@ Usage:
   sbstck-dl download [flags]
 
 Flags:
+  --add-source-url      Add the original post URL at the end of the downloaded file
   -d, --dry-run         Enable dry run
   -f, --format string   Specify the output format (options: "html", "md", "txt" (default "html")
   -h, --help            help for download
@@ -74,6 +75,14 @@ Global Flags:
   -r, --rate int        Specify the rate of requests per second (default 2)
   -v, --verbose         Enable verbose output
 ```
+
+#### Adding Source URL
+
+If you use the `--add-source-url` flag, each downloaded file will have the following line appended to its content:
+
+`original content: POST_URL`
+
+Where `POST_URL` is the canonical URL of the downloaded post. For HTML format, this will be wrapped in a small paragraph with a link.
 
 ### Listing posts
 
