@@ -50,6 +50,13 @@ go mod download
 - Converts HTML to Markdown/Text using external libraries
 - Handles file writing with different formats
 
+### Image Downloader (`lib/images.go`)
+- Downloads images locally from Substack posts
+- Supports multiple image quality levels (high/medium/low)
+- Handles various Substack CDN URL patterns
+- Updates HTML/Markdown content to reference local image paths
+- Creates organized directory structure for downloaded images
+
 ### Commands Structure
 Uses Cobra framework:
 - `download`: Main functionality for downloading posts
@@ -74,6 +81,18 @@ go run . download --url https://example.substack.com --output ./downloads
 ### Testing with verbose output
 ```bash
 go run . download --url https://example.substack.com --verbose --dry-run
+```
+
+### Downloading posts with images
+```bash
+# Download posts with high-quality images
+go run . download --url https://example.substack.com --download-images --image-quality high --output ./downloads
+
+# Download with medium quality images and custom images directory
+go run . download --url https://example.substack.com --download-images --image-quality medium --images-dir assets --output ./downloads
+
+# Download single post with images in markdown format
+go run . download --url https://example.substack.com/p/post-title --download-images --format md --output ./downloads
 ```
 
 ### Building for release

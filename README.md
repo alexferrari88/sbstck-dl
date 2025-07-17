@@ -59,12 +59,15 @@ Usage:
   sbstck-dl download [flags]
 
 Flags:
-  --add-source-url      Add the original post URL at the end of the downloaded file
-  -d, --dry-run         Enable dry run
-  -f, --format string   Specify the output format (options: "html", "md", "txt" (default "html")
-  -h, --help            help for download
-  -o, --output string   Specify the download directory (default ".")
-  -u, --url string      Specify the Substack url
+      --add-source-url         Add the original post URL at the end of the downloaded file
+      --download-images        Download images locally and update content to reference local files
+  -d, --dry-run                Enable dry run
+  -f, --format string          Specify the output format (options: "html", "md", "txt" (default "html")
+  -h, --help                   help for download
+      --image-quality string   Image quality to download (options: "high", "medium", "low") (default "high")
+      --images-dir string      Directory name for downloaded images (default "images")
+  -o, --output string          Specify the download directory (default ".")
+  -u, --url string             Specify the Substack url
 
 Global Flags:
       --after string    Download posts published after this date (format: YYYY-MM-DD)
@@ -83,6 +86,49 @@ If you use the `--add-source-url` flag, each downloaded file will have the follo
 `original content: POST_URL`
 
 Where `POST_URL` is the canonical URL of the downloaded post. For HTML format, this will be wrapped in a small paragraph with a link.
+
+#### Downloading Images
+
+Use the `--download-images` flag to download all images from Substack posts locally. This ensures posts remain accessible even if images are deleted from Substack's CDN.
+
+**Features:**
+- Downloads images at optimal quality (high/medium/low)
+- Creates organized directory structure: `{output}/images/{post-slug}/`
+- Updates HTML/Markdown content to reference local image paths
+- Handles all Substack image formats and CDN patterns
+- Graceful error handling for individual image failures
+
+**Examples:**
+
+```bash
+# Download posts with high-quality images (default)
+sbstck-dl download --url https://example.substack.com --download-images
+
+# Download with medium quality images
+sbstck-dl download --url https://example.substack.com --download-images --image-quality medium
+
+# Download with custom images directory name
+sbstck-dl download --url https://example.substack.com --download-images --images-dir assets
+
+# Download single post with images in markdown format
+sbstck-dl download --url https://example.substack.com/p/post-title --download-images --format md
+```
+
+**Image Quality Options:**
+- `high`: 1456px width (best quality, larger files)
+- `medium`: 848px width (balanced quality/size)
+- `low`: 424px width (smaller files, mobile-optimized)
+
+**Directory Structure:**
+```
+output/
+├── 20231201_120000_post-title.html
+└── images/
+    └── post-title/
+        ├── image1_1456x819.jpeg
+        ├── image2_848x636.png
+        └── image3_1272x720.webp
+```
 
 ### Listing posts
 
@@ -125,7 +171,7 @@ sbstck-dl download --url https://example.substack.com --cookie_name substack.sid
 
 - [x] Improve retry logic
 - [ ] Implement loading from config file
-- [ ] Add support for downloading media
+- [x] Add support for downloading images
 - [x] Add tests
 - [x] Add CI
 - [x] Add documentation

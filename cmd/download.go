@@ -15,12 +15,15 @@ import (
 
 // downloadCmd represents the download command
 var (
-	downloadUrl  string
-	format       string
-	outputFolder string
-	dryRun       bool
-	addSourceURL bool
-	downloadCmd  = &cobra.Command{
+	downloadUrl    string
+	format         string
+	outputFolder   string
+	dryRun         bool
+	addSourceURL   bool
+	downloadImages bool
+	imageQuality   string
+	imagesDir      string
+	downloadCmd    = &cobra.Command{
 		Use:   "download",
 		Short: "Download individual posts or the entire public archive",
 		Long:  `You can provide the url of a single post or the main url of the Substack you want to download.`,
@@ -54,9 +57,19 @@ var (
 					fmt.Printf("Writing post to file %s\n", path)
 				}
 
-				err = post.WriteToFile(path, format, addSourceURL)
-				if err != nil {
-					log.Printf("Error writing file %s: %v\n", path, err)
+				if downloadImages {
+					imageQualityEnum := lib.ImageQuality(imageQuality)
+					imageResult, err := post.WriteToFileWithImages(ctx, path, format, addSourceURL, downloadImages, imageQualityEnum, imagesDir, fetcher)
+					if err != nil {
+						log.Printf("Error writing file %s: %v\n", path, err)
+					} else if verbose && imageResult.Success > 0 {
+						fmt.Printf("Downloaded %d images (%d failed) for post %s\n", imageResult.Success, imageResult.Failed, post.Slug)
+					}
+				} else {
+					err = post.WriteToFile(path, format, addSourceURL)
+					if err != nil {
+						log.Printf("Error writing file %s: %v\n", path, err)
+					}
 				}
 
 				if verbose {
@@ -126,9 +139,19 @@ var (
 						fmt.Printf("Writing post to file %s\n", path)
 					}
 
-					err = post.WriteToFile(path, format, addSourceURL)
-					if err != nil {
-						log.Printf("Error writing file %s: %v\n", path, err)
+					if downloadImages {
+						imageQualityEnum := lib.ImageQuality(imageQuality)
+						imageResult, err := post.WriteToFileWithImages(ctx, path, format, addSourceURL, downloadImages, imageQualityEnum, imagesDir, fetcher)
+						if err != nil {
+							log.Printf("Error writing file %s: %v\n", path, err)
+						} else if verbose && imageResult.Success > 0 {
+							fmt.Printf("Downloaded %d images (%d failed) for post %s\n", imageResult.Success, imageResult.Failed, post.Slug)
+						}
+					} else {
+						err = post.WriteToFile(path, format, addSourceURL)
+						if err != nil {
+							log.Printf("Error writing file %s: %v\n", path, err)
+						}
 					}
 				}
 				if verbose {
@@ -146,6 +169,9 @@ func init() {
 	downloadCmd.Flags().StringVarP(&outputFolder, "output", "o", ".", "Specify the download directory")
 	downloadCmd.Flags().BoolVarP(&dryRun, "dry-run", "d", false, "Enable dry run")
 	downloadCmd.Flags().BoolVar(&addSourceURL, "add-source-url", false, "Add the original post URL at the end of the downloaded file")
+	downloadCmd.Flags().BoolVar(&downloadImages, "download-images", false, "Download images locally and update content to reference local files")
+	downloadCmd.Flags().StringVar(&imageQuality, "image-quality", "high", "Image quality to download (options: \"high\", \"medium\", \"low\")")
+	downloadCmd.Flags().StringVar(&imagesDir, "images-dir", "images", "Directory name for downloaded images")
 	downloadCmd.MarkFlagRequired("url")
 }
 

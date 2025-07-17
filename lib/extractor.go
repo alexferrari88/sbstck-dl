@@ -127,6 +127,96 @@ func (p *Post) WriteToFile(path string, format string, addSourceURL bool) error 
 	return os.WriteFile(path, []byte(content), 0644)
 }
 
+// WriteToFileWithImages writes the Post's content to a file with optional image downloading
+func (p *Post) WriteToFileWithImages(ctx context.Context, path string, format string, addSourceURL bool, 
+	downloadImages bool, imageQuality ImageQuality, imagesDir string, fetcher *Fetcher) (*ImageDownloadResult, error) {
+	
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return nil, err
+	}
+
+	content, err := p.contentForFormat(format, true)
+	if err != nil {
+		return nil, err
+	}
+
+	var imageResult *ImageDownloadResult
+
+	// Download images if requested and format supports it
+	if downloadImages && (format == "html" || format == "md") {
+		outputDir := filepath.Dir(path)
+		imageDownloader := NewImageDownloader(fetcher, outputDir, imagesDir, imageQuality)
+		
+		// Only process HTML content for image downloading
+		htmlContent := content
+		if format == "md" {
+			// For markdown, we need to work with the original HTML
+			htmlContent = p.BodyHTML
+		}
+		
+		imageResult, err = imageDownloader.DownloadImages(ctx, htmlContent, p.Slug)
+		if err != nil {
+			return nil, fmt.Errorf("failed to download images: %w", err)
+		}
+
+		// Update content based on format
+		if format == "html" {
+			content = imageResult.UpdatedHTML
+			// Re-add title if needed
+			if strings.HasPrefix(content, "<h1>") {
+				// Title already included
+			} else {
+				content = fmt.Sprintf("<h1>%s</h1>\n\n%s", p.Title, imageResult.UpdatedHTML)
+			}
+		} else if format == "md" {
+			// Convert updated HTML to markdown
+			updatedContent, err := mdConverter.ConvertString(imageResult.UpdatedHTML)
+			if err != nil {
+				return nil, fmt.Errorf("failed to convert updated HTML to markdown: %w", err)
+			}
+			content = fmt.Sprintf("# %s\n\n%s", p.Title, updatedContent)
+		}
+	} else if downloadImages && format == "txt" {
+		// For text format, we can't embed images, but we can still download them
+		outputDir := filepath.Dir(path)
+		imageDownloader := NewImageDownloader(fetcher, outputDir, imagesDir, imageQuality)
+		
+		imageResult, err = imageDownloader.DownloadImages(ctx, p.BodyHTML, p.Slug)
+		if err != nil {
+			return nil, fmt.Errorf("failed to download images: %w", err)
+		}
+		// Keep original text content since we can't embed images in text format
+	}
+
+	// Add source URL if requested
+	if addSourceURL && p.CanonicalUrl != "" {
+		sourceLine := fmt.Sprintf("\n\noriginal content: %s", p.CanonicalUrl)
+
+		// Adjust formatting slightly for HTML
+		if format == "html" {
+			sourceLine = fmt.Sprintf("<p style=\"margin-top: 2em; font-size: small; color: grey;\">original content: <a href=\"%s\">%s</a></p>", p.CanonicalUrl, p.CanonicalUrl)
+		}
+		content += sourceLine
+	}
+
+	// Write the file
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		return imageResult, err
+	}
+
+	// Return empty result if no image downloading was performed
+	if imageResult == nil {
+		imageResult = &ImageDownloadResult{
+			Images:      []ImageInfo{},
+			UpdatedHTML: content,
+			Success:     0,
+			Failed:      0,
+		}
+	}
+
+	return imageResult, nil
+}
+
 // PostWrapper wraps a Post object for JSON unmarshaling.
 type PostWrapper struct {
 	Post Post `json:"post"`
