@@ -263,8 +263,8 @@ func TestErrorHandling(t *testing.T) {
 			BodyHTML: "<p>Test</p>",
 		}
 		
-		// Try to write to a non-existent directory with no permissions
-		err := post.WriteToFile("/root/non-existent/file.html", "html", false)
+		// Try to write to a file with invalid character (null byte forbidden on both Windows and Unix)
+		err := post.WriteToFile("invalid\x00filename.html", "html", false)
 		assert.Error(t, err)
 	})
 }
