@@ -64,6 +64,14 @@ type ImageDownloadResult struct {
 	Failed      int
 }
 
+// ImageElement represents an image element with all its URLs
+type ImageElement struct {
+	BestURL    string   // The URL to download (highest quality)
+	AllURLs    []string // All URLs that should be replaced with the local path
+	LocalPath  string   // Local path after download
+	Success    bool     // Whether download was successful
+}
+
 // DownloadImages downloads all images from a post's HTML content and returns updated HTML
 func (id *ImageDownloader) DownloadImages(ctx context.Context, htmlContent string, postSlug string) (*ImageDownloadResult, error) {
 	// Parse HTML content
@@ -72,13 +80,13 @@ func (id *ImageDownloader) DownloadImages(ctx context.Context, htmlContent strin
 		return nil, fmt.Errorf("failed to parse HTML content: %w", err)
 	}
 
-	// Extract image URLs
-	imageURLs, err := id.extractImageURLs(doc)
+	// Extract image elements with all their URLs
+	imageElements, err := id.extractImageElements(doc)
 	if err != nil {
-		return nil, fmt.Errorf("failed to extract image URLs: %w", err)
+		return nil, fmt.Errorf("failed to extract image elements: %w", err)
 	}
 
-	if len(imageURLs) == 0 {
+	if len(imageElements) == 0 {
 		return &ImageDownloadResult{
 			Images:      []ImageInfo{},
 			UpdatedHTML: htmlContent,
@@ -93,17 +101,20 @@ func (id *ImageDownloader) DownloadImages(ctx context.Context, htmlContent strin
 		return nil, fmt.Errorf("failed to create images directory: %w", err)
 	}
 
-	// Download images
+	// Download images and build URL mapping
 	var images []ImageInfo
 	urlToLocalPath := make(map[string]string)
 
-	for _, imageURL := range imageURLs {
-		imageInfo := id.downloadSingleImage(ctx, imageURL, imagesPath)
+	for _, element := range imageElements {
+		// Download the best quality URL
+		imageInfo := id.downloadSingleImage(ctx, element.BestURL, imagesPath)
 		images = append(images, imageInfo)
 
 		if imageInfo.Success {
-			// Store mapping for URL replacement
-			urlToLocalPath[imageInfo.OriginalURL] = imageInfo.LocalPath
+			// Map ALL URLs for this image element to the same local path
+			for _, url := range element.AllURLs {
+				urlToLocalPath[url] = imageInfo.LocalPath
+			}
 		}
 	}
 
@@ -129,7 +140,24 @@ func (id *ImageDownloader) DownloadImages(ctx context.Context, htmlContent strin
 	}, nil
 }
 
-// extractImageURLs extracts image URLs from HTML content
+// extractImageElements extracts image elements with all their URLs from HTML content
+func (id *ImageDownloader) extractImageElements(doc *goquery.Document) ([]ImageElement, error) {
+	var imageElements []ImageElement
+	seenBestURLs := make(map[string]bool) // To avoid duplicates based on best URL
+
+	// Find all img tags
+	doc.Find("img").Each(func(i int, s *goquery.Selection) {
+		element := id.getImageElementInfo(s)
+		if element.BestURL != "" && !seenBestURLs[element.BestURL] {
+			imageElements = append(imageElements, element)
+			seenBestURLs[element.BestURL] = true
+		}
+	})
+
+	return imageElements, nil
+}
+
+// extractImageURLs extracts image URLs from HTML content (kept for backward compatibility with tests)
 func (id *ImageDownloader) extractImageURLs(doc *goquery.Document) ([]string, error) {
 	var imageURLs []string
 	urlSet := make(map[string]bool) // To avoid duplicates
@@ -145,6 +173,51 @@ func (id *ImageDownloader) extractImageURLs(doc *goquery.Document) ([]string, er
 	})
 
 	return imageURLs, nil
+}
+
+// getImageElementInfo extracts all URLs and determines the best one for an img element
+func (id *ImageDownloader) getImageElementInfo(imgElement *goquery.Selection) ImageElement {
+	var allURLs []string
+	urlSet := make(map[string]bool) // To avoid duplicates
+	
+	// Helper function to add unique URLs
+	addURL := func(url string) {
+		if url != "" && !urlSet[url] {
+			allURLs = append(allURLs, url)
+			urlSet[url] = true
+		}
+	}
+	
+	// 1. Get URL from data-attrs JSON (highest priority)
+	if dataAttrs, exists := imgElement.Attr("data-attrs"); exists {
+		var attrs map[string]interface{}
+		if err := json.Unmarshal([]byte(dataAttrs), &attrs); err == nil {
+			if src, ok := attrs["src"].(string); ok && src != "" {
+				addURL(src)
+			}
+		}
+	}
+	
+	// 2. Get URLs from srcset attribute
+	if srcset, exists := imgElement.Attr("srcset"); exists {
+		srcsetURLs := id.extractAllURLsFromSrcset(srcset)
+		for _, url := range srcsetURLs {
+			addURL(url)
+		}
+	}
+	
+	// 3. Get URL from src attribute
+	if src, exists := imgElement.Attr("src"); exists {
+		addURL(src)
+	}
+	
+	// Determine the best URL to download
+	bestURL := id.getBestImageURL(imgElement)
+	
+	return ImageElement{
+		BestURL: bestURL,
+		AllURLs: allURLs,
+	}
 }
 
 // getBestImageURL extracts the best quality image URL from an img element
@@ -192,6 +265,37 @@ func (id *ImageDownloader) getTargetWidth() int {
 	default:
 		return 1456
 	}
+}
+
+// extractAllURLsFromSrcset extracts all URLs from a srcset attribute
+func (id *ImageDownloader) extractAllURLsFromSrcset(srcset string) []string {
+	if srcset == "" {
+		return []string{} // Return empty slice instead of nil
+	}
+	
+	var urls []string
+	
+	// Split srcset into individual entries
+	entries := strings.Split(srcset, ",")
+	
+	for _, entry := range entries {
+		entry = strings.TrimSpace(entry)
+		
+		// Parse "URL WIDTHw" format
+		parts := strings.Split(entry, " ")
+		if len(parts) >= 1 {
+			url := parts[0]
+			if url != "" {
+				urls = append(urls, url)
+			}
+		}
+	}
+	
+	if urls == nil {
+		return []string{} // Ensure we never return nil
+	}
+	
+	return urls
 }
 
 // extractURLFromSrcset extracts the URL with the target width from a srcset attribute

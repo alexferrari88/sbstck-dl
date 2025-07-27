@@ -560,6 +560,161 @@ func TestWithRealSubstackHTML(t *testing.T) {
 	}
 }
 
+// TestURLReplacementIssue tests that all image URLs are properly replaced in HTML
+func TestURLReplacementIssue(t *testing.T) {
+	// Create test server
+	server := createTestImageServer()
+	defer server.Close()
+	
+	// Create temporary directory
+	tempDir, err := os.MkdirTemp("", "url-replacement-test-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+	
+	// Create downloader
+	downloader := NewImageDownloader(nil, tempDir, "images", ImageQualityHigh)
+	
+	// Create HTML with mismatched URLs between src and data-attrs
+	// Use server URLs so downloads will succeed
+	htmlContent := fmt.Sprintf(`<div class="captioned-image-container">
+  <figure>
+    <a class="image-link" href="%s/fullsize.jpeg">
+      <div class="image2-inset">
+        <picture>
+          <img src="%s/w_1456.jpeg" 
+               srcset="%s/w_424.jpeg 424w, %s/w_848.jpeg 848w, %s/w_1456.jpeg 1456w"
+               data-attrs='{"src":"%s/original-high-quality.jpeg","width":1456,"height":819}'
+               alt="Test image" width="1456" height="819">
+        </picture>
+      </div>
+    </a>
+  </figure>
+</div>
+
+<img src="%s/simple-src.jpg" 
+     data-attrs='{"src":"%s/data-attrs-src.jpg","width":800,"height":600}' 
+     alt="Simple image">`, 
+		server.URL, server.URL, server.URL, server.URL, server.URL, server.URL, server.URL, server.URL)
+	
+	t.Logf("Original HTML:\n%s", htmlContent)
+	
+	// Use the full DownloadImages method which should use the new logic
+	ctx := context.Background()
+	result, err := downloader.DownloadImages(ctx, htmlContent, "test-post")
+	require.NoError(t, err)
+	
+	t.Logf("Download results: Success=%d, Failed=%d", result.Success, result.Failed)
+	t.Logf("Updated HTML:\n%s", result.UpdatedHTML)
+	
+	// Verify that ALL URLs were replaced, not just the ones from data-attrs
+	problemURLs := []string{
+		fmt.Sprintf("%s/w_1456.jpeg", server.URL),        // src attribute
+		fmt.Sprintf("%s/simple-src.jpg", server.URL),     // simple src
+		fmt.Sprintf("%s/w_424.jpeg", server.URL),         // srcset URLs
+		fmt.Sprintf("%s/w_848.jpeg", server.URL),
+	}
+	
+	for _, url := range problemURLs {
+		if strings.Contains(result.UpdatedHTML, url) {
+			t.Errorf("URL should be replaced but still present: %s", url)
+		}
+	}
+	
+	// Verify some images were actually downloaded
+	assert.Greater(t, result.Success, 0, "Should have successful downloads")
+	
+	// Verify local paths are present
+	assert.Contains(t, result.UpdatedHTML, "images/test-post/", "Should contain local image paths")
+}
+
+// TestExtractImageElements tests the new image element extraction with all URLs
+func TestExtractImageElements(t *testing.T) {
+	downloader := NewImageDownloader(nil, "/tmp", "images", ImageQualityHigh)
+	
+	htmlContent := `
+	<!-- Image with all attributes -->
+	<img src="https://example.com/src.jpg" 
+	     srcset="https://example.com/small.jpg 400w, https://example.com/large.jpg 800w"
+	     data-attrs='{"src":"https://example.com/data.jpg","width":800,"height":600}' 
+	     alt="Complete image">
+	
+	<!-- Image with only src -->
+	<img src="https://example.com/simple.jpg" alt="Simple image">
+	
+	<!-- Image with only data-attrs -->
+	<img data-attrs='{"src":"https://example.com/data-only.jpg","width":400,"height":300}' alt="Data only">
+	`
+	
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(htmlContent))
+	require.NoError(t, err)
+	
+	imageElements, err := downloader.extractImageElements(doc)
+	require.NoError(t, err)
+	
+	// Should find 3 image elements
+	assert.Len(t, imageElements, 3)
+	
+	// First image should have all URLs
+	elem1 := imageElements[0]
+	assert.Equal(t, "https://example.com/data.jpg", elem1.BestURL) // data-attrs has priority
+	expectedURLs1 := []string{
+		"https://example.com/data.jpg",     // from data-attrs
+		"https://example.com/small.jpg",    // from srcset
+		"https://example.com/large.jpg",    // from srcset
+		"https://example.com/src.jpg",      // from src
+	}
+	assert.ElementsMatch(t, expectedURLs1, elem1.AllURLs)
+	
+	// Second image should have only src URL
+	elem2 := imageElements[1]
+	assert.Equal(t, "https://example.com/simple.jpg", elem2.BestURL)
+	assert.Equal(t, []string{"https://example.com/simple.jpg"}, elem2.AllURLs)
+	
+	// Third image should have only data-attrs URL
+	elem3 := imageElements[2]
+	assert.Equal(t, "https://example.com/data-only.jpg", elem3.BestURL)
+	assert.Equal(t, []string{"https://example.com/data-only.jpg"}, elem3.AllURLs)
+}
+
+// TestExtractAllURLsFromSrcset tests srcset URL extraction
+func TestExtractAllURLsFromSrcset(t *testing.T) {
+	downloader := NewImageDownloader(nil, "/tmp", "images", ImageQualityHigh)
+	
+	tests := []struct {
+		name     string
+		srcset   string
+		expected []string
+	}{
+		{
+			name:   "MultipleSizes",
+			srcset: "img-400.jpg 400w, img-800.jpg 800w, img-1200.jpg 1200w",
+			expected: []string{"img-400.jpg", "img-800.jpg", "img-1200.jpg"},
+		},
+		{
+			name:   "SingleEntry",
+			srcset: "single.jpg 1024w",
+			expected: []string{"single.jpg"},
+		},
+		{
+			name:   "ExtraSpaces",
+			srcset: "  spaced1.jpg 400w  ,   spaced2.jpg 800w  ",
+			expected: []string{"spaced1.jpg", "spaced2.jpg"},
+		},
+		{
+			name:     "Empty",
+			srcset:   "",
+			expected: []string{},
+		},
+	}
+	
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			urls := downloader.extractAllURLsFromSrcset(test.srcset)
+			assert.Equal(t, test.expected, urls)
+		})
+	}
+}
+
 // TestImageURLParsing tests URL parsing with various Substack image patterns
 func TestImageURLParsing(t *testing.T) {
 	downloader := NewImageDownloader(nil, "/tmp", "images", ImageQualityHigh)
