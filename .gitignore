@@ -23,6 +23,7 @@ go.work
 
 # Directory contained scraped content
 scraped/
+test-download/
 
 # vscode
 .vscode/
