@@ -275,8 +275,8 @@ func (id *ImageDownloader) extractAllURLsFromSrcset(srcset string) []string {
 	
 	var urls []string
 	
-	// Split srcset into individual entries
-	entries := strings.Split(srcset, ",")
+	// Use the same robust parsing as updateSrcsetAttribute
+	entries := id.parseSrcsetEntries(srcset)
 	
 	for _, entry := range entries {
 		entry = strings.TrimSpace(entry)
@@ -304,8 +304,8 @@ func (id *ImageDownloader) extractAllURLsFromSrcset(srcset string) []string {
 
 // extractURLFromSrcset extracts the URL with the target width from a srcset attribute
 func (id *ImageDownloader) extractURLFromSrcset(srcset string, targetWidth int) string {
-	// Split srcset into individual entries
-	entries := strings.Split(srcset, ",")
+	// Use the robust parsing to handle URLs with commas
+	entries := id.parseSrcsetEntries(srcset)
 	
 	var bestURL string
 	var bestWidth int
@@ -579,8 +579,8 @@ func (id *ImageDownloader) updateSrcsetAttribute(srcset string, urlToRelPath map
 		return srcset
 	}
 
-	// Split srcset into individual entries
-	entries := strings.Split(srcset, ",")
+	// Parse srcset more carefully to handle URLs with commas
+	entries := id.parseSrcsetEntries(srcset)
 	
 	// Map to track unique local paths and their best width descriptor
 	pathToEntry := make(map[string]string)
@@ -653,6 +653,42 @@ func (id *ImageDownloader) updateSrcsetAttribute(srcset string, urlToRelPath map
 	}
 
 	return strings.Join(updatedEntries, ", ")
+}
+
+// parseSrcsetEntries carefully parses srcset entries, handling URLs that contain commas
+func (id *ImageDownloader) parseSrcsetEntries(srcset string) []string {
+	var entries []string
+	
+	// Use regex to find URLs followed by width descriptors
+	// This pattern matches: (URL) (WIDTH)w where URL can contain commas
+	pattern := regexp.MustCompile(`(https?://[^\s]+)\s+(\d+w)`)
+	matches := pattern.FindAllStringSubmatch(srcset, -1)
+	
+	for _, match := range matches {
+		if len(match) >= 3 {
+			url := match[1]
+			width := match[2]
+			entries = append(entries, url+" "+width)
+		}
+	}
+	
+	// If regex parsing didn't find anything, fall back to simple comma splitting
+	// but only for URLs that don't contain commas
+	if len(entries) == 0 {
+		parts := strings.Split(srcset, ",")
+		for _, part := range parts {
+			part = strings.TrimSpace(part)
+			if part != "" {
+				// Only include if it looks like a proper entry (URL + width or just URL)
+				fields := strings.Fields(part)
+				if len(fields) >= 1 && (strings.HasPrefix(fields[0], "http://") || strings.HasPrefix(fields[0], "https://")) {
+					entries = append(entries, part)
+				}
+			}
+		}
+	}
+	
+	return entries
 }
 
 // updateDataAttrsJSON updates URLs in a data-attrs JSON string

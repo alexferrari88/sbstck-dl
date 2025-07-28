@@ -148,27 +148,27 @@ func TestExtractURLFromSrcset(t *testing.T) {
 	}{
 		{
 			name:        "ExactMatch",
-			srcset:      "image-424.jpg 424w, image-848.jpg 848w, image-1456.jpg 1456w",
+			srcset:      "https://example.com/image-424.jpg 424w, https://example.com/image-848.jpg 848w, https://example.com/image-1456.jpg 1456w",
 			targetWidth: 848,
-			expected:    "image-848.jpg",
+			expected:    "https://example.com/image-848.jpg",
 		},
 		{
 			name:        "ClosestHigher",
-			srcset:      "image-424.jpg 424w, image-1200.jpg 1200w, image-1456.jpg 1456w",
+			srcset:      "https://example.com/image-424.jpg 424w, https://example.com/image-1200.jpg 1200w, https://example.com/image-1456.jpg 1456w",
 			targetWidth: 800,
-			expected:    "image-1200.jpg",
+			expected:    "https://example.com/image-1200.jpg",
 		},
 		{
 			name:        "ClosestLower",
-			srcset:      "image-200.jpg 200w, image-400.jpg 400w",
+			srcset:      "https://example.com/image-200.jpg 200w, https://example.com/image-400.jpg 400w",
 			targetWidth: 800,
-			expected:    "image-400.jpg",
+			expected:    "https://example.com/image-400.jpg",
 		},
 		{
 			name:        "SingleEntry",
-			srcset:      "single-image.jpg 1024w",
+			srcset:      "https://example.com/single-image.jpg 1024w",
 			targetWidth: 800,
-			expected:    "single-image.jpg",
+			expected:    "https://example.com/single-image.jpg",
 		},
 		{
 			name:        "EmptySrcset",
@@ -833,18 +833,18 @@ func TestExtractAllURLsFromSrcset(t *testing.T) {
 	}{
 		{
 			name:   "MultipleSizes",
-			srcset: "img-400.jpg 400w, img-800.jpg 800w, img-1200.jpg 1200w",
-			expected: []string{"img-400.jpg", "img-800.jpg", "img-1200.jpg"},
+			srcset: "https://example.com/img-400.jpg 400w, https://example.com/img-800.jpg 800w, https://example.com/img-1200.jpg 1200w",
+			expected: []string{"https://example.com/img-400.jpg", "https://example.com/img-800.jpg", "https://example.com/img-1200.jpg"},
 		},
 		{
 			name:   "SingleEntry",
-			srcset: "single.jpg 1024w",
-			expected: []string{"single.jpg"},
+			srcset: "https://example.com/single.jpg 1024w",
+			expected: []string{"https://example.com/single.jpg"},
 		},
 		{
 			name:   "ExtraSpaces",
-			srcset: "  spaced1.jpg 400w  ,   spaced2.jpg 800w  ",
-			expected: []string{"spaced1.jpg", "spaced2.jpg"},
+			srcset: "  https://example.com/spaced1.jpg 400w  ,   https://example.com/spaced2.jpg 800w  ",
+			expected: []string{"https://example.com/spaced1.jpg", "https://example.com/spaced2.jpg"},
 		},
 		{
 			name:     "Empty",
