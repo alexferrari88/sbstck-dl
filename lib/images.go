@@ -466,6 +466,77 @@ func (id *ImageDownloader) extractDimensionsFromURL(imageURL string) (int, int) 
 
 // updateHTMLWithLocalPaths replaces image URLs in HTML with local paths
 func (id *ImageDownloader) updateHTMLWithLocalPaths(htmlContent string, urlToLocalPath map[string]string) string {
+	// Parse HTML content
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(htmlContent))
+	if err != nil {
+		// Fallback to simple string replacement if parsing fails
+		return id.updateHTMLWithStringReplacement(htmlContent, urlToLocalPath)
+	}
+
+	// Create URL to relative path mapping
+	urlToRelPath := make(map[string]string)
+	for originalURL, localPath := range urlToLocalPath {
+		// Convert absolute local path to relative path from output directory
+		relPath, err := filepath.Rel(id.outputDir, localPath)
+		if err != nil {
+			relPath = localPath // fallback to absolute path
+		}
+		// Always ensure forward slashes for HTML (web standard)
+		relPath = strings.ReplaceAll(relPath, "\\", "/")
+		urlToRelPath[originalURL] = relPath
+	}
+
+	// Update img elements
+	doc.Find("img").Each(func(i int, s *goquery.Selection) {
+		// Update src attribute
+		if src, exists := s.Attr("src"); exists {
+			if relPath, found := urlToRelPath[src]; found {
+				s.SetAttr("src", relPath)
+			}
+		}
+
+		// Update srcset attribute
+		if srcset, exists := s.Attr("srcset"); exists {
+			updatedSrcset := id.updateSrcsetAttribute(srcset, urlToRelPath)
+			s.SetAttr("srcset", updatedSrcset)
+		}
+
+		// Update data-attrs JSON
+		if dataAttrs, exists := s.Attr("data-attrs"); exists {
+			updatedDataAttrs := id.updateDataAttrsJSON(dataAttrs, urlToRelPath)
+			s.SetAttr("data-attrs", updatedDataAttrs)
+		}
+	})
+
+	// Update anchor elements with image links
+	doc.Find("a").Each(func(i int, s *goquery.Selection) {
+		if href, exists := s.Attr("href"); exists {
+			if relPath, found := urlToRelPath[href]; found {
+				s.SetAttr("href", relPath)
+			}
+		}
+	})
+
+	// Update source elements (in picture tags)
+	doc.Find("source").Each(func(i int, s *goquery.Selection) {
+		if srcset, exists := s.Attr("srcset"); exists {
+			updatedSrcset := id.updateSrcsetAttribute(srcset, urlToRelPath)
+			s.SetAttr("srcset", updatedSrcset)
+		}
+	})
+
+	// Get the updated HTML
+	html, err := doc.Html()
+	if err != nil {
+		// Fallback to simple string replacement if HTML generation fails
+		return id.updateHTMLWithStringReplacement(htmlContent, urlToLocalPath)
+	}
+
+	return html
+}
+
+// updateHTMLWithStringReplacement is the fallback method using simple string replacement
+func (id *ImageDownloader) updateHTMLWithStringReplacement(htmlContent string, urlToLocalPath map[string]string) string {
 	updatedHTML := htmlContent
 
 	for originalURL, localPath := range urlToLocalPath {
@@ -490,4 +561,113 @@ func (id *ImageDownloader) updateHTMLWithLocalPaths(htmlContent string, urlToLoc
 	}
 
 	return updatedHTML
+}
+
+// updateSrcsetAttribute updates URLs in a srcset attribute
+func (id *ImageDownloader) updateSrcsetAttribute(srcset string, urlToRelPath map[string]string) string {
+	if srcset == "" {
+		return srcset
+	}
+
+	// Split srcset into individual entries
+	entries := strings.Split(srcset, ",")
+	
+	// Map to track unique local paths and their best width descriptor
+	pathToEntry := make(map[string]string)
+	
+	for _, entry := range entries {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+
+		// Parse "URL WIDTH" format
+		parts := strings.Fields(entry)
+		if len(parts) >= 1 {
+			url := parts[0]
+			// Replace URL if we have a mapping for it
+			if relPath, found := urlToRelPath[url]; found {
+				// Build the new entry with local path
+				var newEntry string
+				if len(parts) >= 2 {
+					// Has width descriptor
+					newEntry = relPath + " " + parts[1]
+				} else {
+					// No width descriptor
+					newEntry = relPath
+				}
+				
+				// Only keep one entry per unique local path
+				// If we already have an entry for this path, keep the one with width descriptor
+				if existingEntry, exists := pathToEntry[relPath]; exists {
+					// Prefer entries with width descriptors
+					if len(parts) >= 2 && !strings.Contains(existingEntry, " ") {
+						pathToEntry[relPath] = newEntry
+					}
+					// If both have width descriptors or both don't, keep the first one
+				} else {
+					pathToEntry[relPath] = newEntry
+				}
+			} else {
+				// URL wasn't mapped, keep original entry
+				pathToEntry[url] = entry
+			}
+		}
+	}
+
+	// Convert map back to slice, maintaining order as much as possible
+	var updatedEntries []string
+	for _, entry := range entries {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		
+		parts := strings.Fields(entry)
+		if len(parts) >= 1 {
+			url := parts[0]
+			if relPath, found := urlToRelPath[url]; found {
+				// Use the entry from our deduplication map
+				if finalEntry, exists := pathToEntry[relPath]; exists {
+					updatedEntries = append(updatedEntries, finalEntry)
+					delete(pathToEntry, relPath) // Remove to avoid duplicates
+				}
+			} else {
+				// Original URL, use as-is
+				if finalEntry, exists := pathToEntry[url]; exists {
+					updatedEntries = append(updatedEntries, finalEntry)
+					delete(pathToEntry, url)
+				}
+			}
+		}
+	}
+
+	return strings.Join(updatedEntries, ", ")
+}
+
+// updateDataAttrsJSON updates URLs in a data-attrs JSON string
+func (id *ImageDownloader) updateDataAttrsJSON(dataAttrs string, urlToRelPath map[string]string) string {
+	if dataAttrs == "" {
+		return dataAttrs
+	}
+
+	var attrs map[string]interface{}
+	if err := json.Unmarshal([]byte(dataAttrs), &attrs); err != nil {
+		return dataAttrs // Return original if parsing fails
+	}
+
+	// Update src field if it exists
+	if src, ok := attrs["src"].(string); ok {
+		if relPath, found := urlToRelPath[src]; found {
+			attrs["src"] = relPath
+		}
+	}
+
+	// Marshal back to JSON
+	updatedJSON, err := json.Marshal(attrs)
+	if err != nil {
+		return dataAttrs // Return original if marshaling fails
+	}
+
+	return string(updatedJSON)
 }
