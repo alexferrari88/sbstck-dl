@@ -280,12 +280,16 @@ func (id *ImageDownloader) extractAllURLsFromSrcset(srcset string) []string {
 	
 	for _, entry := range entries {
 		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
 		
 		// Parse "URL WIDTHw" format
-		parts := strings.Split(entry, " ")
+		parts := strings.Fields(entry)
 		if len(parts) >= 1 {
 			url := parts[0]
-			if url != "" {
+			// Only include if it looks like a valid URL (not a fragment like "f_webp")
+			if url != "" && (strings.HasPrefix(url, "http://") || strings.HasPrefix(url, "https://")) {
 				urls = append(urls, url)
 			}
 		}
@@ -308,20 +312,26 @@ func (id *ImageDownloader) extractURLFromSrcset(srcset string, targetWidth int) 
 
 	for _, entry := range entries {
 		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
 		
 		// Parse "URL WIDTHw" format
-		parts := strings.Split(entry, " ")
+		parts := strings.Fields(entry)
 		if len(parts) >= 2 {
 			url := parts[0]
 			widthStr := strings.TrimSuffix(parts[1], "w")
 			
-			if width, err := strconv.Atoi(widthStr); err == nil {
-				// Find the closest width to our target, preferring exact matches or higher
-				if width == targetWidth || (bestURL == "" || 
-					(width >= targetWidth && (bestWidth < targetWidth || width < bestWidth)) ||
-					(width < targetWidth && bestWidth < targetWidth && width > bestWidth)) {
-					bestURL = url
-					bestWidth = width
+			// Only process if it looks like a valid URL
+			if url != "" && (strings.HasPrefix(url, "http://") || strings.HasPrefix(url, "https://")) {
+				if width, err := strconv.Atoi(widthStr); err == nil {
+					// Find the closest width to our target, preferring exact matches or higher
+					if width == targetWidth || (bestURL == "" || 
+						(width >= targetWidth && (bestWidth < targetWidth || width < bestWidth)) ||
+						(width < targetWidth && bestWidth < targetWidth && width > bestWidth)) {
+						bestURL = url
+						bestWidth = width
+					}
 				}
 			}
 		}

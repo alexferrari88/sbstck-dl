@@ -627,6 +627,152 @@ func TestURLReplacementIssue(t *testing.T) {
 	assert.Contains(t, result.UpdatedHTML, "images/test-post/", "Should contain local image paths")
 }
 
+// TestCommaSeparatedURLRegressionBug tests the specific bug reported in v0.6.0
+// where multiple URLs for the same image (in srcset, data-attrs, etc.) would
+// create comma-separated URL strings in the output instead of clean local paths.
+// This is a regression test to ensure this specific pattern doesn't break again.
+func TestCommaSeparatedURLRegressionBug(t *testing.T) {
+	// Create a test server that serves image content
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Return a small PNG image for any request
+		w.Header().Set("Content-Type", "image/png")
+		w.WriteHeader(http.StatusOK)
+		// Write minimal PNG data
+		pngData := []byte{0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52}
+		w.Write(pngData)
+	}))
+	defer server.Close()
+
+	// Create temporary directory
+	tempDir := t.TempDir()
+	
+	fetcher := NewFetcher()
+	downloader := NewImageDownloader(fetcher, tempDir, "images", ImageQualityHigh)
+	
+	// Create HTML that reproduces the exact bug pattern from the bug report
+	// This simulates real Substack HTML where the same image appears with multiple URL variations
+	// but they all represent the same actual image file and should map to the same local path
+	baseImageID := "4697c31d-2502-48d2-b6c1-11e5ea97536f_2560x2174"
+	
+	// These represent different CDN transformations of the same base image
+	// All should download the same file and map to the same local path
+	originalURL := fmt.Sprintf("%s/substack-post-media.s3.amazonaws.com/public/images/%s.jpeg", server.URL, baseImageID)
+	w1456URL := fmt.Sprintf("%s/substackcdn.com/image/fetch/w_1456,c_limit,f_auto,q_auto:good/https%%3A%%2F%%2Fsubstack-post-media.s3.amazonaws.com%%2Fpublic%%2Fimages%%2F%s.jpeg", server.URL, baseImageID)
+	w848URL := fmt.Sprintf("%s/substackcdn.com/image/fetch/w_848,c_limit,f_auto,q_auto:good/https%%3A%%2F%%2Fsubstack-post-media.s3.amazonaws.com%%2Fpublic%%2Fimages%%2F%s.jpeg", server.URL, baseImageID)
+	w424URL := fmt.Sprintf("%s/substackcdn.com/image/fetch/w_424,c_limit,f_auto,q_auto:good/https%%3A%%2F%%2Fsubstack-post-media.s3.amazonaws.com%%2Fpublic%%2Fimages%%2F%s.jpeg", server.URL, baseImageID)
+	webpURL := fmt.Sprintf("%s/substackcdn.com/image/fetch/f_webp,w_1456,c_limit,q_auto:good/https%%3A%%2F%%2Fsubstack-post-media.s3.amazonaws.com%%2Fpublic%%2Fimages%%2F%s.jpeg", server.URL, baseImageID)
+	
+	// Create HTML that matches the structure from the bug report
+	// All these URLs should map to the same local file path
+	htmlContent := fmt.Sprintf(`<div class="captioned-image-container">
+  <figure>
+    <a class="image-link image2 is-viewable-img" target="_blank" href="%s" data-component-name="Image2ToDOM">
+      <div class="image2-inset">
+        <picture>
+          <source type="image/webp" srcset="%s 424w, %s 848w, %s 1272w, %s 1456w" sizes="100vw">
+          <img src="%s" 
+               srcset="%s 424w, %s 848w, %s 1272w, %s 1456w" 
+               data-attrs='{"src":"%s","srcNoWatermark":null,"fullscreen":false,"imageSize":"large","height":1236,"width":1456}'
+               class="sizing-large" alt="Test Image" title="Test Image" 
+               sizes="100vw" fetchpriority="high">
+        </picture>
+      </div>
+    </a>
+  </figure>
+</div>`, 
+		originalURL,  // href
+		w424URL, w848URL, w1456URL, webpURL,  // webp srcset
+		w1456URL,     // img src  
+		w424URL, w848URL, w1456URL, webpURL,  // img srcset
+		originalURL)  // data-attrs src
+	
+	t.Logf("Original HTML with potentially problematic URLs:\n%s", htmlContent)
+	
+	// Download images using the full pipeline
+	ctx := context.Background()
+	result, err := downloader.DownloadImages(ctx, htmlContent, "good-ideas")
+	require.NoError(t, err)
+	
+	t.Logf("Download results: Success=%d, Failed=%d", result.Success, result.Failed)
+	t.Logf("Updated HTML:\n%s", result.UpdatedHTML)
+	
+	// THE KEY REGRESSION TEST: Verify no comma-separated URL strings appear
+	// This is the exact bug pattern that was reported
+	commaSeparatedPatterns := []string{
+		"images/good-ideas/" + baseImageID + ".jpeg,images/good-ideas/",  // Should not have comma-separated paths
+		",f_webp,images/good-ideas/",  // Should not have CDN parameters mixed with local paths
+		"images/good-ideas/" + baseImageID + ".jpeg,images/good-ideas/" + baseImageID + ".jpeg",  // Repeated paths
+	}
+	
+	for _, pattern := range commaSeparatedPatterns {
+		if strings.Contains(result.UpdatedHTML, pattern) {
+			t.Errorf("REGRESSION BUG DETECTED: Found comma-separated URL pattern in output: %s", pattern)
+			t.Errorf("This indicates the string replacement bug has returned")
+		}
+	}
+	
+	// Verify that all original URLs have been replaced with local paths
+	originalURLs := []string{originalURL, w1456URL, w848URL, w424URL, webpURL}
+	for _, url := range originalURLs {
+		if strings.Contains(result.UpdatedHTML, url) {
+			t.Errorf("Original URL should be replaced but still present: %s", url)
+		}
+	}
+	
+	// Verify clean local paths are present
+	expectedLocalPath := "images/good-ideas/" + baseImageID + ".jpeg"
+	if !strings.Contains(result.UpdatedHTML, expectedLocalPath) {
+		t.Errorf("Expected local path not found: %s", expectedLocalPath)
+	}
+	
+	// Verify srcset entries are clean (no commas except between entries)
+	if strings.Contains(result.UpdatedHTML, `srcset="`) {
+		// Extract srcset content
+		srcsetStart := strings.Index(result.UpdatedHTML, `srcset="`) + 8
+		srcsetEnd := strings.Index(result.UpdatedHTML[srcsetStart:], `"`)
+		srcsetContent := result.UpdatedHTML[srcsetStart : srcsetStart+srcsetEnd]
+		
+		t.Logf("Extracted srcset: %s", srcsetContent)
+		
+		// Verify srcset has proper format: "path width, path width, ..." or just "path"
+		// Should NOT have comma-separated paths without proper structure
+		entries := strings.Split(srcsetContent, ",")
+		for i, entry := range entries {
+			entry = strings.TrimSpace(entry)
+			if entry == "" {
+				continue
+			}
+			
+			parts := strings.Fields(entry)
+			if len(parts) == 0 {
+				t.Errorf("Srcset entry %d is empty after trimming: %s", i, entry)
+				continue
+			}
+			
+			// First part should be a clean local path
+			if !strings.HasPrefix(parts[0], "images/good-ideas/") {
+				t.Errorf("Srcset entry %d doesn't have proper local path: %s", i, parts[0])
+			}
+			
+			// If there's a second part, it should be a width descriptor
+			if len(parts) >= 2 {
+				if !strings.HasSuffix(parts[1], "w") {
+					t.Errorf("Srcset entry %d has invalid width descriptor: %s", i, parts[1])
+				}
+			}
+			
+			// Should not have more than 2 parts
+			if len(parts) > 2 {
+				t.Errorf("Srcset entry %d has too many parts (should be 'path' or 'path width'): %s", i, entry)
+			}
+		}
+	}
+	
+	// Verify at least one image was successfully downloaded
+	assert.Greater(t, result.Success, 0, "Should have successful downloads")
+	assert.Equal(t, 0, result.Failed, "Should have no failed downloads")
+}
+
 // TestExtractImageElements tests the new image element extraction with all URLs
 func TestExtractImageElements(t *testing.T) {
 	downloader := NewImageDownloader(nil, "/tmp", "images", ImageQualityHigh)
