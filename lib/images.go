@@ -144,13 +144,80 @@ func (id *ImageDownloader) DownloadImages(ctx context.Context, htmlContent strin
 func (id *ImageDownloader) extractImageElements(doc *goquery.Document) ([]ImageElement, error) {
 	var imageElements []ImageElement
 	seenBestURLs := make(map[string]bool) // To avoid duplicates based on best URL
+	allURLsToCollect := make(map[string][]string) // Map from best URL to all URLs that should map to it
 
-	// Find all img tags
+	// Find all img tags and collect their URLs
 	doc.Find("img").Each(func(i int, s *goquery.Selection) {
 		element := id.getImageElementInfo(s)
 		if element.BestURL != "" && !seenBestURLs[element.BestURL] {
+			allURLsToCollect[element.BestURL] = element.AllURLs
 			imageElements = append(imageElements, element)
 			seenBestURLs[element.BestURL] = true
+		}
+	})
+
+	// Also collect URLs from <a> tags that link to images
+	doc.Find("a").Each(func(i int, s *goquery.Selection) {
+		if href, exists := s.Attr("href"); exists && id.isImageURL(href) {
+			// Find the corresponding image element to add this URL to
+			for bestURL, urls := range allURLsToCollect {
+				if id.isSameImage(href, bestURL) {
+					// Add this href URL to the list of URLs to replace
+					urlExists := false
+					for _, existingURL := range urls {
+						if existingURL == href {
+							urlExists = true
+							break
+						}
+					}
+					if !urlExists {
+						allURLsToCollect[bestURL] = append(urls, href)
+						// Update the corresponding element in imageElements
+						for j, elem := range imageElements {
+							if elem.BestURL == bestURL {
+								imageElements[j].AllURLs = allURLsToCollect[bestURL]
+								break
+							}
+						}
+					}
+					break
+				}
+			}
+		}
+	})
+
+	// Also collect URLs from <source> tags (in <picture> elements)
+	doc.Find("source").Each(func(i int, s *goquery.Selection) {
+		if srcset, exists := s.Attr("srcset"); exists {
+			srcsetURLs := id.extractAllURLsFromSrcset(srcset)
+			for _, srcsetURL := range srcsetURLs {
+				if id.isImageURL(srcsetURL) {
+					// Find the corresponding image element to add this URL to
+					for bestURL, urls := range allURLsToCollect {
+						if id.isSameImage(srcsetURL, bestURL) {
+							// Add this srcset URL to the list of URLs to replace
+							urlExists := false
+							for _, existingURL := range urls {
+								if existingURL == srcsetURL {
+									urlExists = true
+									break
+								}
+							}
+							if !urlExists {
+								allURLsToCollect[bestURL] = append(urls, srcsetURL)
+								// Update the corresponding element in imageElements
+								for j, elem := range imageElements {
+									if elem.BestURL == bestURL {
+										imageElements[j].AllURLs = allURLsToCollect[bestURL]
+										break
+									}
+								}
+							}
+							break
+						}
+					}
+				}
+			}
 		}
 	})
 
@@ -653,6 +720,45 @@ func (id *ImageDownloader) updateSrcsetAttribute(srcset string, urlToRelPath map
 	}
 
 	return strings.Join(updatedEntries, ", ")
+}
+
+// isImageURL checks if a URL appears to be an image URL (Substack CDN or S3)
+func (id *ImageDownloader) isImageURL(url string) bool {
+	return strings.Contains(url, "substackcdn.com") || 
+		   strings.Contains(url, "substack-post-media.s3.amazonaws.com") ||
+		   strings.Contains(url, "bucketeer-") // Some Substack images use bucketeer URLs
+}
+
+// isSameImage checks if two URLs refer to the same image by comparing the core image identifier
+func (id *ImageDownloader) isSameImage(url1, url2 string) bool {
+	// Extract the UUID pattern from both URLs
+	uuidPattern := regexp.MustCompile(`([a-f0-9-]{36})`)
+	
+	matches1 := uuidPattern.FindStringSubmatch(url1)
+	matches2 := uuidPattern.FindStringSubmatch(url2) 
+	
+	if len(matches1) > 0 && len(matches2) > 0 {
+		return matches1[1] == matches2[1]
+	}
+	
+	// Fallback: if we can't find UUIDs, check if the URLs contain similar image identifiers
+	// This handles cases where the URL structure might vary
+	return strings.Contains(url1, extractImageID(url2)) || strings.Contains(url2, extractImageID(url1))
+}
+
+// extractImageID extracts a unique identifier from an image URL
+func extractImageID(url string) string {
+	// Try to extract UUID first
+	if match := regexp.MustCompile(`([a-f0-9-]{36})`).FindStringSubmatch(url); len(match) > 0 {
+		return match[1]
+	}
+	
+	// Fallback to extracting a filename-like pattern
+	if match := regexp.MustCompile(`/([^/]+)\.(jpeg|jpg|png|webp|heic|gif)(?:\?|$)`).FindStringSubmatch(url); len(match) > 0 {
+		return match[1]
+	}
+	
+	return ""
 }
 
 // parseSrcsetEntries carefully parses srcset entries, handling URLs that contain commas

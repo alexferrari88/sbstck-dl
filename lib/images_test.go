@@ -891,3 +891,315 @@ func TestImageURLParsing(t *testing.T) {
 		})
 	}
 }
+
+// TestImageURLHelperFunctions tests the helper functions added for the bug fix
+func TestImageURLHelperFunctions(t *testing.T) {
+	downloader := NewImageDownloader(nil, "/tmp", "images", ImageQualityHigh)
+	
+	t.Run("IsImageURL", func(t *testing.T) {
+		tests := []struct {
+			name     string
+			url      string
+			expected bool
+		}{
+			{"SubstackCDN", "https://substackcdn.com/image/fetch/w_1456/image.jpg", true},
+			{"SubstackS3", "https://substack-post-media.s3.amazonaws.com/public/images/test.png", true},
+			{"Bucketeer", "https://bucketeer-e05bbc84-baa3-437e-9518-adb32be77984.s3.amazonaws.com/public/images/test.jpeg", true},
+			{"NotImage", "https://example.com/page.html", false},
+			{"RegularImage", "https://example.com/image.jpg", false}, // Not Substack
+		}
+		
+		for _, test := range tests {
+			t.Run(test.name, func(t *testing.T) {
+				result := downloader.isImageURL(test.url)
+				assert.Equal(t, test.expected, result)
+			})
+		}
+	})
+	
+	t.Run("IsSameImage", func(t *testing.T) {
+		baseUUID := "b0ebde87-580d-4dce-bb73-573edf9229ff"
+		tests := []struct {
+			name     string
+			url1     string
+			url2     string
+			expected bool
+		}{
+			{
+				"SameUUID",
+				fmt.Sprintf("https://substackcdn.com/image/fetch/w_1456/%s_1024x1536.heic", baseUUID),
+				fmt.Sprintf("https://substack-post-media.s3.amazonaws.com/public/images/%s_1024x1536.heic", baseUUID),
+				true,
+			},
+			{
+				"DifferentUUIDs",
+				"https://substackcdn.com/image/fetch/w_1456/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee_800x600.jpg",
+				"https://substackcdn.com/image/fetch/w_848/ffffffff-gggg-hhhh-iiii-jjjjjjjjjjjj_800x600.jpg",
+				false,
+			},
+			{
+				"NoUUIDs",
+				"https://example.com/image1.jpg",
+				"https://example.com/image2.jpg",
+				false,
+			},
+		}
+		
+		for _, test := range tests {
+			t.Run(test.name, func(t *testing.T) {
+				result := downloader.isSameImage(test.url1, test.url2)
+				assert.Equal(t, test.expected, result)
+			})
+		}
+	})
+	
+	t.Run("ExtractImageID", func(t *testing.T) {
+		tests := []struct {
+			name     string
+			url      string
+			expected string
+		}{
+			{
+				"UUID",
+				"https://substack-post-media.s3.amazonaws.com/public/images/b0ebde87-580d-4dce-bb73-573edf9229ff_1024x1536.heic",
+				"b0ebde87-580d-4dce-bb73-573edf9229ff",
+			},
+			{
+				"FilenamePattern",
+				"https://example.com/path/to/myimage.jpg",
+				"myimage",
+			},
+			{
+				"NoPattern",
+				"https://example.com/path/",
+				"",
+			},
+		}
+		
+		for _, test := range tests {
+			t.Run(test.name, func(t *testing.T) {
+				result := extractImageID(test.url)
+				assert.Equal(t, test.expected, result)
+			})
+		}
+	})
+}
+
+// TestExtractImageElementsWithAnchorAndSourceTags tests the bug fix for collecting URLs from <a> and <source> tags
+func TestExtractImageElementsWithAnchorAndSourceTags(t *testing.T) {
+	downloader := NewImageDownloader(nil, "/tmp", "images", ImageQualityHigh)
+	
+	// This HTML pattern reproduces the exact structure from real Substack posts
+	// where the same image appears in multiple places with different URLs
+	baseUUID := "f35ed9ff-eb9e-4106-a443-45c963ae74cd"
+	originalURL := fmt.Sprintf("https://substack-post-media.s3.amazonaws.com/public/images/%s_1208x793.png", baseUUID)
+	hrefURL := fmt.Sprintf("https://substackcdn.com/image/fetch/f_auto,q_auto:good,fl_progressive:steep/https%%3A%%2F%%2Fsubstack-post-media.s3.amazonaws.com%%2Fpublic%%2Fimages%%2F%s_1208x793.png", baseUUID)
+	w424URL := fmt.Sprintf("https://substackcdn.com/image/fetch/w_424,c_limit,f_webp,q_auto:good,fl_progressive:steep/https%%3A%%2F%%2Fsubstack-post-media.s3.amazonaws.com%%2Fpublic%%2Fimages%%2F%s_1208x793.png", baseUUID)
+	w848URL := fmt.Sprintf("https://substackcdn.com/image/fetch/w_848,c_limit,f_webp,q_auto:good,fl_progressive:steep/https%%3A%%2F%%2Fsubstack-post-media.s3.amazonaws.com%%2Fpublic%%2Fimages%%2F%s_1208x793.png", baseUUID)
+	w1456URL := fmt.Sprintf("https://substackcdn.com/image/fetch/w_1456,c_limit,f_webp,q_auto:good,fl_progressive:steep/https%%3A%%2F%%2Fsubstack-post-media.s3.amazonaws.com%%2Fpublic%%2Fimages%%2F%s_1208x793.png", baseUUID)
+	
+	htmlContent := fmt.Sprintf(`
+	<div class="captioned-image-container">
+	  <figure>
+	    <a class="image-link image2 is-viewable-img" target="_blank" href="%s" data-component-name="Image2ToDOM">
+	      <div class="image2-inset">
+	        <picture>
+	          <source type="image/webp" srcset="%s 424w, %s 848w, %s 1456w" sizes="100vw"/>
+	          <img src="%s" 
+	               srcset="%s 424w, %s 848w, %s 1456w" 
+	               data-attrs='{"src":"%s","width":1208,"height":793,"type":"image/png"}'
+	               class="sizing-normal" alt="" 
+	               sizes="100vw" fetchpriority="high"/>
+	        </picture>
+	      </div>
+	    </a>
+	  </figure>
+	</div>`,
+		hrefURL,                               // <a href>
+		w424URL, w848URL, w1456URL,            // <source srcset>
+		originalURL,                           // <img src>
+		w424URL, w848URL, w1456URL,            // <img srcset>
+		originalURL)                           // data-attrs src
+	
+	t.Logf("Test HTML:\n%s", htmlContent)
+	
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(htmlContent))
+	require.NoError(t, err)
+	
+	imageElements, err := downloader.extractImageElements(doc)
+	require.NoError(t, err)
+	
+	// Should find exactly 1 image element (all URLs refer to the same image)
+	assert.Len(t, imageElements, 1, "Should find exactly one image element")
+	
+	elem := imageElements[0]
+	t.Logf("BestURL: %s", elem.BestURL)
+	t.Logf("AllURLs: %v", elem.AllURLs)
+	
+	// Best URL should be from data-attrs (highest priority)
+	assert.Equal(t, originalURL, elem.BestURL)
+	
+	// All URLs should be collected (from img src, img srcset, source srcset, a href, and data-attrs)
+	expectedURLs := []string{
+		originalURL,  // from data-attrs and img src
+		w424URL,      // from srcsets
+		w848URL,      // from srcsets
+		w1456URL,     // from srcsets
+		hrefURL,      // from <a href>
+	}
+	
+	// Check that all expected URLs are present
+	for _, expectedURL := range expectedURLs {
+		assert.Contains(t, elem.AllURLs, expectedURL, "Should contain URL: %s", expectedURL)
+	}
+	
+	// Should not have duplicates
+	urlCounts := make(map[string]int)
+	for _, url := range elem.AllURLs {
+		urlCounts[url]++
+	}
+	for url, count := range urlCounts {
+		assert.Equal(t, 1, count, "URL should appear exactly once: %s", url)
+	}
+}
+
+// TestHrefAndSourceURLReplacementRegression tests the specific bug where images were downloaded 
+// but <a href> and <source srcset> URLs weren't replaced with local paths
+func TestHrefAndSourceURLReplacementRegression(t *testing.T) {
+	// Create test server
+	server := createTestImageServer()
+	defer server.Close()
+	
+	// Create temporary directory
+	tempDir, err := os.MkdirTemp("", "href-source-regression-test-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+	
+	// Create downloader
+	downloader := NewImageDownloader(nil, tempDir, "images", ImageQualityHigh)
+	
+	// Create HTML that reproduces the exact bug:
+	// - Images are downloaded successfully
+	// - img src and srcset are replaced correctly
+	// - BUT <a href> and <source srcset> still contain original URLs
+	// Using Substack-style URLs so they're detected as image URLs
+	baseUUID := "123e4567-e89b-12d3-a456-426614174000"
+	imageURL := server.URL + "/substack-post-media.s3.amazonaws.com/public/images/" + baseUUID + "_800x600.png"
+	hrefURL := server.URL + "/substackcdn.com/image/fetch/f_auto,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F" + baseUUID + "_1200x900.png"
+	srcsetURL1 := server.URL + "/substackcdn.com/image/fetch/w_424,c_limit,f_webp,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F" + baseUUID + "_800x600.png"
+	srcsetURL2 := server.URL + "/substackcdn.com/image/fetch/w_848,c_limit,f_webp,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F" + baseUUID + "_800x600.png"
+	
+	htmlContent := fmt.Sprintf(`
+	<div class="captioned-image-container">
+	  <figure>
+	    <a class="image-link image2 is-viewable-img" target="_blank" href="%s">
+	      <div class="image2-inset">
+	        <picture>
+	          <source type="image/webp" srcset="%s 424w, %s 848w" sizes="100vw"/>
+	          <img src="%s" 
+	               srcset="%s 424w, %s 848w" 
+	               alt="Test image" width="800" height="600"/>
+	        </picture>
+	      </div>
+	    </a>
+	  </figure>
+	</div>`,
+		hrefURL,                     // <a href> - THIS was not being replaced in the bug
+		srcsetURL1, srcsetURL2,      // <source srcset> - THIS was not being replaced in the bug
+		imageURL,                    // <img src> - this was working
+		srcsetURL1, srcsetURL2)      // <img srcset> - this was working
+	
+	t.Logf("Original HTML with problematic URLs:\n%s", htmlContent)
+	
+	// Download images using the full pipeline
+	ctx := context.Background()
+	result, err := downloader.DownloadImages(ctx, htmlContent, "regression-test")
+	require.NoError(t, err)
+	
+	t.Logf("Download results: Success=%d, Failed=%d", result.Success, result.Failed)
+	t.Logf("Updated HTML:\n%s", result.UpdatedHTML)
+	
+	// CRITICAL REGRESSION TEST: Verify ALL original URLs are replaced
+	originalURLs := []string{imageURL, hrefURL, srcsetURL1, srcsetURL2}
+	
+	for _, originalURL := range originalURLs {
+		assert.NotContains(t, result.UpdatedHTML, originalURL, 
+			"REGRESSION BUG: Original URL should be replaced but still present: %s", originalURL)
+	}
+	
+	// Verify local paths are present  
+	assert.Contains(t, result.UpdatedHTML, "images/regression-test/", "Should contain local image directory path")
+	
+	// Verify <a href> was replaced with local path
+	assert.Regexp(t, `href="images/regression-test/[^"]*"`, result.UpdatedHTML, "href should point to local path")
+	
+	// Verify <source srcset> was replaced with local paths
+	assert.Contains(t, result.UpdatedHTML, `<source type="image/webp" srcset="images/regression-test/`, 
+		"source srcset should contain local paths")
+	
+	// Verify some images were successfully downloaded
+	assert.Greater(t, result.Success, 0, "Should have successful downloads")
+	
+	// Verify image files exist on disk
+	imagesDir := filepath.Join(tempDir, "images", "regression-test")
+	files, err := os.ReadDir(imagesDir)
+	assert.NoError(t, err)
+	assert.Greater(t, len(files), 0, "Should have downloaded image files to disk")
+}
+
+// TestComplexSubstackImageStructureRegression tests the full complex Substack image structure
+// that was reported in the original bug, ensuring all image references are properly replaced
+func TestComplexSubstackImageStructureRegression(t *testing.T) {
+	// Create test server
+	server := createTestImageServer()
+	defer server.Close()
+	
+	// Create temporary directory  
+	tempDir, err := os.MkdirTemp("", "complex-substack-regression-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+	
+	// Create downloader
+	downloader := NewImageDownloader(nil, tempDir, "images", ImageQualityHigh)
+	
+	// This is the exact HTML structure from the bug report, with server URLs
+	htmlContent := fmt.Sprintf(`<div class="captioned-image-container"><figure><a class="image-link image2 is-viewable-img" target="_blank" href="%s/substackcdn.com/image/fetch/$s_!7a2j!,f_auto,q_auto:good,fl_progressive:steep/https%%3A%%2F%%2Fsubstack-post-media.s3.amazonaws.com%%2Fpublic%%2Fimages%%2Fb0ebde87-580d-4dce-bb73-573edf9229ff_1024x1536.heic" data-component-name="Image2ToDOM"><div class="image2-inset"><picture><source type="image/webp" srcset="%s/substackcdn.com/image/fetch/$s_!7a2j!,w_424,c_limit,f_webp,q_auto:good,fl_progressive:steep/https%%3A%%2F%%2Fsubstack-post-media.s3.amazonaws.com%%2Fpublic%%2Fimages%%2Fb0ebde87-580d-4dce-bb73-573edf9229ff_1024x1536.heic 424w, %s/substackcdn.com/image/fetch/$s_!7a2j!,w_848,c_limit,f_webp,q_auto:good,fl_progressive:steep/https%%3A%%2F%%2Fsubstack-post-media.s3.amazonaws.com%%2Fpublic%%2Fimages%%2Fb0ebde87-580d-4dce-bb73-573edf9229ff_1024x1536.heic 848w, %s/substackcdn.com/image/fetch/$s_!7a2j!,w_1456,c_limit,f_webp,q_auto:good,fl_progressive:steep/https%%3A%%2F%%2Fsubstack-post-media.s3.amazonaws.com%%2Fpublic%%2Fimages%%2Fb0ebde87-580d-4dce-bb73-573edf9229ff_1024x1536.heic 1456w" sizes="100vw"/><img src="%s/substack-post-media.s3.amazonaws.com/public/images/b0ebde87-580d-4dce-bb73-573edf9229ff_1024x1536.heic" width="1024" height="1536" data-attrs="{&#34;src&#34;:&#34;%s/substack-post-media.s3.amazonaws.com/public/images/b0ebde87-580d-4dce-bb73-573edf9229ff_1024x1536.heic&#34;,&#34;width&#34;:1024,&#34;height&#34;:1536}" class="sizing-normal" alt="" srcset="%s/substack-post-media.s3.amazonaws.com/public/images/b0ebde87-580d-4dce-bb73-573edf9229ff_1024x1536.heic 424w" sizes="100vw" fetchpriority="high"/></picture></div></a></figure></div>`,
+		server.URL, server.URL, server.URL, server.URL, server.URL, server.URL, server.URL)
+	
+	t.Logf("Complex Substack HTML structure:\n%s", htmlContent)
+	
+	// Process the HTML 
+	ctx := context.Background()
+	result, err := downloader.DownloadImages(ctx, htmlContent, "complex-test")
+	require.NoError(t, err)
+	
+	t.Logf("Download results: Success=%d, Failed=%d", result.Success, result.Failed)
+	t.Logf("Updated HTML:\n%s", result.UpdatedHTML)
+	
+	// Verify NO original server URLs remain in the output
+	assert.NotContains(t, result.UpdatedHTML, server.URL, 
+		"REGRESSION BUG: Original server URLs should be completely replaced")
+	
+	// Verify local paths are present
+	assert.Contains(t, result.UpdatedHTML, "images/complex-test/", "Should contain local image paths")
+	
+	// Verify the href was replaced
+	assert.Contains(t, result.UpdatedHTML, `href="images/complex-test/`, "href should point to local path")
+	
+	// Verify source srcset was replaced  
+	assert.Contains(t, result.UpdatedHTML, `<source type="image/webp" srcset="images/complex-test/`, 
+		"source srcset should contain local paths")
+	
+	// Verify img src was replaced
+	assert.Contains(t, result.UpdatedHTML, `src="images/complex-test/`, "img src should point to local path")
+	
+	// Verify img srcset was replaced
+	assert.Regexp(t, `srcset="images/complex-test/[^"]+\s+424w"`, result.UpdatedHTML, 
+		"img srcset should contain local paths with width descriptors")
+	
+	// Verify data-attrs was updated (JSON can be reordered and HTML-encoded)
+	assert.Regexp(t, `&#34;src&#34;:&#34;images/complex-test/[^&]*&#34;`, result.UpdatedHTML, "data-attrs src should be updated")
+	
+	// Verify at least one image was successfully downloaded
+	assert.Greater(t, result.Success, 0, "Should have successful downloads")
+}
