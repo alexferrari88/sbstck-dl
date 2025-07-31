@@ -175,12 +175,17 @@ func (fd *FileDownloader) extractFilenameFromURL(downloadURL string) string {
 		return ""
 	}
 
-	// Try to get filename from path
+	// Try to get filename from path using URL-safe path handling
 	path := parsed.Path
-	if path != "" {
-		filename := filepath.Base(path)
-		if filename != "." && filename != "/" && filename != "" {
-			return filename
+	if path != "" && path != "/" {
+		// Use strings.LastIndex to find the last segment in a cross-platform way
+		// This avoids issues with filepath.Base on different operating systems
+		lastSlash := strings.LastIndex(path, "/")
+		if lastSlash >= 0 && lastSlash < len(path)-1 {
+			filename := path[lastSlash+1:]
+			if filename != "" && filename != "." {
+				return filename
+			}
 		}
 	}
 
