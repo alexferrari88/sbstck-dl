@@ -3,15 +3,17 @@
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Project Overview
-This is a Go CLI tool for downloading posts from Substack blogs. It supports downloading individual posts or entire archives, with features for private newsletters (via cookies), rate limiting, and format conversion (HTML/Markdown/Text).
+This is a Go CLI tool for downloading posts from Substack blogs. It supports downloading individual posts or entire archives, with features for private newsletters (via cookies), rate limiting, format conversion (HTML/Markdown/Text), and downloading of images and file attachments locally.
 
 ## Architecture
 The project follows a standard Go CLI structure:
 - `main.go`: Entry point
 - `cmd/`: Contains Cobra CLI commands (`root.go`, `download.go`, `list.go`, `version.go`)
-- `lib/`: Core library with two main components:
+- `lib/`: Core library with four main components:
   - `fetcher.go`: HTTP client with rate limiting, retries, and cookie support
   - `extractor.go`: Post extraction and format conversion (HTML→Markdown/Text)
+  - `images.go`: Image downloading and local path management
+  - `files.go`: File attachment downloading and local path management
 
 ## Build and Development Commands
 
@@ -57,6 +59,14 @@ go mod download
 - Updates HTML/Markdown content to reference local image paths
 - Creates organized directory structure for downloaded images
 
+### File Downloader (`lib/files.go`)
+- Downloads file attachments from Substack posts using CSS selector `.file-embed-button.wide`
+- Supports file extension filtering (optional)
+- Creates organized directory structure for downloaded files
+- Updates HTML content to reference local file paths
+- Handles filename sanitization and collision avoidance
+- Integrates with existing image download workflow
+
 ### Commands Structure
 Uses Cobra framework:
 - `download`: Main functionality for downloading posts
@@ -93,6 +103,21 @@ go run . download --url https://example.substack.com --download-images --image-q
 
 # Download single post with images in markdown format
 go run . download --url https://example.substack.com/p/post-title --download-images --format md --output ./downloads
+```
+
+### Downloading posts with file attachments
+```bash
+# Download posts with file attachments
+go run . download --url https://example.substack.com --download-files --output ./downloads
+
+# Download with specific file extensions only
+go run . download --url https://example.substack.com --download-files --file-extensions "pdf,docx,txt" --output ./downloads
+
+# Download with custom files directory name
+go run . download --url https://example.substack.com --download-files --files-dir attachments --output ./downloads
+
+# Download single post with both images and file attachments
+go run . download --url https://example.substack.com/p/post-title --download-images --download-files --output ./downloads
 ```
 
 ### Building for release

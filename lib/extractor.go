@@ -129,7 +129,8 @@ func (p *Post) WriteToFile(path string, format string, addSourceURL bool) error 
 
 // WriteToFileWithImages writes the Post's content to a file with optional image downloading
 func (p *Post) WriteToFileWithImages(ctx context.Context, path string, format string, addSourceURL bool, 
-	downloadImages bool, imageQuality ImageQuality, imagesDir string, fetcher *Fetcher) (*ImageDownloadResult, error) {
+	downloadImages bool, imageQuality ImageQuality, imagesDir string, 
+	downloadFiles bool, fileExtensions []string, filesDir string, fetcher *Fetcher) (*ImageDownloadResult, error) {
 	
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return nil, err
@@ -186,6 +187,44 @@ func (p *Post) WriteToFileWithImages(ctx context.Context, path string, format st
 			return nil, fmt.Errorf("failed to download images: %w", err)
 		}
 		// Keep original text content since we can't embed images in text format
+	}
+
+	// Download files if requested and format supports it
+	if downloadFiles && (format == "html" || format == "md") {
+		outputDir := filepath.Dir(path)
+		fileDownloader := NewFileDownloader(fetcher, outputDir, filesDir, fileExtensions)
+		
+		// Process HTML content for file downloading - use the updated HTML from images if available
+		htmlContent := content
+		if imageResult != nil && imageResult.UpdatedHTML != "" {
+			htmlContent = imageResult.UpdatedHTML
+		} else if format == "md" {
+			// For markdown, we need to work with the original HTML
+			htmlContent = p.BodyHTML
+		}
+		
+		fileResult, err := fileDownloader.DownloadFiles(ctx, htmlContent, p.Slug)
+		if err != nil {
+			return nil, fmt.Errorf("failed to download files: %w", err)
+		}
+
+		// Update content based on format if files were processed
+		if fileResult.Success > 0 || fileResult.Failed > 0 {
+			if format == "html" {
+				content = fileResult.UpdatedHTML
+				// Re-add title if needed
+				if !strings.HasPrefix(content, "<h1>") {
+					content = fmt.Sprintf("<h1>%s</h1>\n\n%s", p.Title, fileResult.UpdatedHTML)
+				}
+			} else if format == "md" {
+				// Convert updated HTML to markdown
+				updatedContent, err := mdConverter.ConvertString(fileResult.UpdatedHTML)
+				if err != nil {
+					return nil, fmt.Errorf("failed to convert updated HTML to markdown: %w", err)
+				}
+				content = fmt.Sprintf("# %s\n\n%s", p.Title, updatedContent)
+			}
+		}
 	}
 
 	// Add source URL if requested

@@ -60,8 +60,11 @@ Usage:
 
 Flags:
       --add-source-url         Add the original post URL at the end of the downloaded file
+      --download-files         Download file attachments locally and update content to reference local files
       --download-images        Download images locally and update content to reference local files
   -d, --dry-run                Enable dry run
+      --file-extensions string Comma-separated list of file extensions to download (e.g., 'pdf,docx,txt'). If empty, downloads all file types
+      --files-dir string       Directory name for downloaded file attachments (default "files")
   -f, --format string          Specify the output format (options: "html", "md", "txt" (default "html")
   -h, --help                   help for download
       --image-quality string   Image quality to download (options: "high", "medium", "low") (default "high")
@@ -128,6 +131,54 @@ output/
         ├── image1_1456x819.jpeg
         ├── image2_848x636.png
         └── image3_1272x720.webp
+```
+
+#### Downloading File Attachments
+
+Use the `--download-files` flag to download all file attachments from Substack posts locally. This ensures posts remain accessible even if files are removed from Substack's servers.
+
+**Features:**
+- Downloads file attachments using CSS selector `.file-embed-button.wide`
+- Optional file extension filtering (e.g., only PDFs and Word documents)
+- Creates organized directory structure: `{output}/files/{post-slug}/`
+- Updates HTML content to reference local file paths
+- Handles filename sanitization and collision avoidance
+- Graceful error handling for individual file download failures
+
+**Examples:**
+
+```bash
+# Download posts with all file attachments
+sbstck-dl download --url https://example.substack.com --download-files
+
+# Download only specific file types
+sbstck-dl download --url https://example.substack.com --download-files --file-extensions "pdf,docx,txt"
+
+# Download with custom files directory name
+sbstck-dl download --url https://example.substack.com --download-files --files-dir attachments
+
+# Download single post with both images and file attachments
+sbstck-dl download --url https://example.substack.com/p/post-title --download-images --download-files --format md
+```
+
+**File Extension Filtering:**
+- Specify extensions without dots: `pdf,docx,txt`
+- Case insensitive matching
+- If no extensions specified, downloads all file types
+
+**Directory Structure with Files:**
+```
+output/
+├── 20231201_120000_post-title.html
+├── images/
+│   └── post-title/
+│       ├── image1_1456x819.jpeg
+│       └── image2_848x636.png
+└── files/
+    └── post-title/
+        ├── document.pdf
+        ├── spreadsheet.xlsx
+        └── presentation.pptx
 ```
 
 ### Listing posts

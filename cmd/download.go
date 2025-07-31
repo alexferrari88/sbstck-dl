@@ -23,6 +23,9 @@ var (
 	downloadImages bool
 	imageQuality   string
 	imagesDir      string
+	downloadFiles  bool
+	fileExtensions string
+	filesDir       string
 	downloadCmd    = &cobra.Command{
 		Use:   "download",
 		Short: "Download individual posts or the entire public archive",
@@ -57,9 +60,14 @@ var (
 					fmt.Printf("Writing post to file %s\n", path)
 				}
 
-				if downloadImages {
+				if downloadImages || downloadFiles {
 					imageQualityEnum := lib.ImageQuality(imageQuality)
-					imageResult, err := post.WriteToFileWithImages(ctx, path, format, addSourceURL, downloadImages, imageQualityEnum, imagesDir, fetcher)
+					// Parse file extensions if specified
+					var fileExtensionsSlice []string
+					if fileExtensions != "" {
+						fileExtensionsSlice = strings.Split(strings.ReplaceAll(fileExtensions, " ", ""), ",")
+					}
+					imageResult, err := post.WriteToFileWithImages(ctx, path, format, addSourceURL, downloadImages, imageQualityEnum, imagesDir, downloadFiles, fileExtensionsSlice, filesDir, fetcher)
 					if err != nil {
 						log.Printf("Error writing file %s: %v\n", path, err)
 					} else if verbose && imageResult.Success > 0 {
@@ -139,9 +147,14 @@ var (
 						fmt.Printf("Writing post to file %s\n", path)
 					}
 
-					if downloadImages {
+					if downloadImages || downloadFiles {
 						imageQualityEnum := lib.ImageQuality(imageQuality)
-						imageResult, err := post.WriteToFileWithImages(ctx, path, format, addSourceURL, downloadImages, imageQualityEnum, imagesDir, fetcher)
+						// Parse file extensions if specified
+						var fileExtensionsSlice []string
+						if fileExtensions != "" {
+							fileExtensionsSlice = strings.Split(strings.ReplaceAll(fileExtensions, " ", ""), ",")
+						}
+						imageResult, err := post.WriteToFileWithImages(ctx, path, format, addSourceURL, downloadImages, imageQualityEnum, imagesDir, downloadFiles, fileExtensionsSlice, filesDir, fetcher)
 						if err != nil {
 							log.Printf("Error writing file %s: %v\n", path, err)
 						} else if verbose && imageResult.Success > 0 {
@@ -172,6 +185,9 @@ func init() {
 	downloadCmd.Flags().BoolVar(&downloadImages, "download-images", false, "Download images locally and update content to reference local files")
 	downloadCmd.Flags().StringVar(&imageQuality, "image-quality", "high", "Image quality to download (options: \"high\", \"medium\", \"low\")")
 	downloadCmd.Flags().StringVar(&imagesDir, "images-dir", "images", "Directory name for downloaded images")
+	downloadCmd.Flags().BoolVar(&downloadFiles, "download-files", false, "Download file attachments locally and update content to reference local files")
+	downloadCmd.Flags().StringVar(&fileExtensions, "file-extensions", "", "Comma-separated list of file extensions to download (e.g., 'pdf,docx,txt'). If empty, downloads all file types")
+	downloadCmd.Flags().StringVar(&filesDir, "files-dir", "files", "Directory name for downloaded file attachments")
 	downloadCmd.MarkFlagRequired("url")
 }
 
