@@ -43,8 +43,11 @@ func createTestFileServer() *httptest.Server {
 		case strings.Contains(path, "server-error"):
 			w.WriteHeader(http.StatusInternalServerError)
 		case strings.Contains(path, "timeout"):
-			// Don't respond to simulate timeout
-			select {}
+			// Don't respond to simulate timeout - but add a timeout to prevent hanging
+			select {
+			case <-time.After(5 * time.Second):
+				w.WriteHeader(http.StatusRequestTimeout)
+			}
 		case strings.Contains(path, "with-query"):
 			// Handle URLs with filename in query parameter
 			filename := r.URL.Query().Get("filename")
