@@ -27,3 +27,6 @@ test-download/
 
 # vscode
 .vscode/
+
+# serena
+cache/
