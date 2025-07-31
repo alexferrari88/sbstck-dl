@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/stretchr/testify/assert"
@@ -41,8 +42,11 @@ func createTestImageServer() *httptest.Server {
 		case strings.Contains(path, "server-error"):
 			w.WriteHeader(http.StatusInternalServerError)
 		case strings.Contains(path, "timeout"):
-			// Don't respond to simulate timeout
-			select {}
+			// Don't respond to simulate timeout - but add a timeout to prevent hanging
+			select {
+			case <-time.After(5 * time.Second):
+				w.WriteHeader(http.StatusRequestTimeout)
+			}
 		default:
 			w.Header().Set("Content-Type", "image/png")
 			w.WriteHeader(http.StatusOK)
