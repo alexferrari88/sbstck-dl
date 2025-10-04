@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -33,22 +34,51 @@ func (r *RawPost) ToPost() (Post, error) {
 	return wrapper.Post, nil
 }
 
+// Comment represents a Substack comment with metadata.
+type Comment struct {
+	Id           int       `json:"id"`
+	PostId       int       `json:"post_id"`
+	UserId       int       `json:"user_id"`
+	Body         string    `json:"body"`
+	BodyHTML     string    `json:"body_html"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+	EditedAt     *time.Time `json:"edited_at,omitempty"`
+	LikesCount   int       `json:"likes_count"`
+	RepliesCount int       `json:"replies_count"`
+	ParentId     *int      `json:"parent_id,omitempty"`
+	User         CommentUser `json:"user"`
+	Replies      []Comment `json:"replies,omitempty"`
+}
+
+// CommentUser represents the user who wrote a comment.
+type CommentUser struct {
+	Id          int    `json:"id"`
+	Name        string `json:"name"`
+	Handle      string `json:"handle"`
+	PhotoURL    string `json:"photo_url"`
+	IsSubstack  bool   `json:"is_substack"`
+	Verified    bool   `json:"verified"`
+}
+
 // Post represents a structured Substack post with various fields.
 type Post struct {
-	Id               int    `json:"id"`
-	PublicationId    int    `json:"publication_id"`
-	Type             string `json:"type"`
-	Slug             string `json:"slug"`
-	PostDate         string `json:"post_date"`
-	CanonicalUrl     string `json:"canonical_url"`
-	PreviousPostSlug string `json:"previous_post_slug"`
-	NextPostSlug     string `json:"next_post_slug"`
-	CoverImage       string `json:"cover_image"`
-	Description      string `json:"description"`
-	Subtitle         string `json:"subtitle,omitempty"`
-	WordCount        int    `json:"wordcount"`
-	Title            string `json:"title"`
-	BodyHTML         string `json:"body_html"`
+	Id               int       `json:"id"`
+	PublicationId    int       `json:"publication_id"`
+	Type             string    `json:"type"`
+	Slug             string    `json:"slug"`
+	PostDate         string    `json:"post_date"`
+	CanonicalUrl     string    `json:"canonical_url"`
+	PreviousPostSlug string    `json:"previous_post_slug"`
+	NextPostSlug     string    `json:"next_post_slug"`
+	CoverImage       string    `json:"cover_image"`
+	Description      string    `json:"description"`
+	Subtitle         string    `json:"subtitle,omitempty"`
+	WordCount        int       `json:"wordcount"`
+	Title            string    `json:"title"`
+	BodyHTML         string    `json:"body_html"`
+	Comments         []Comment `json:"comments,omitempty"`
+	CommentsCount    int       `json:"comments_count"`
 }
 
 // Static converter instance to avoid recreating it for each conversion
@@ -67,6 +97,69 @@ func (p *Post) ToMD(withTitle bool) (string, error) {
 	return mdConverter.ConvertString(p.BodyHTML)
 }
 
+// ToMDWithComments converts the Post's HTML body and comments to Markdown format.
+func (p *Post) ToMDWithComments(withTitle bool) (string, error) {
+	content, err := p.ToMD(withTitle)
+	if err != nil {
+		return "", err
+	}
+
+	if len(p.Comments) > 0 {
+		content += "\n\n---\n\n## Comments\n\n"
+		for i, comment := range p.Comments {
+			content += fmt.Sprintf("### %s", comment.User.Name)
+			if comment.User.Handle != "" {
+				content += fmt.Sprintf(" (@%s)", comment.User.Handle)
+			}
+			if !comment.CreatedAt.IsZero() {
+				content += fmt.Sprintf(" - %s", comment.CreatedAt.Format("Jan 2, 2006"))
+			}
+			if comment.LikesCount > 0 {
+				content += fmt.Sprintf(" (%d likes)", comment.LikesCount)
+			}
+			content += "\n\n"
+
+			// Convert comment body from HTML to markdown
+			commentBody := comment.Body
+			if comment.BodyHTML != "" {
+				if mdBody, err := mdConverter.ConvertString(comment.BodyHTML); err == nil {
+					commentBody = mdBody
+				}
+			}
+			content += commentBody + "\n\n"
+
+			// Add replies
+			if len(comment.Replies) > 0 {
+				for _, reply := range comment.Replies {
+					content += fmt.Sprintf("> **%s replied:", reply.User.Name)
+					if !reply.CreatedAt.IsZero() {
+						content += fmt.Sprintf(" %s", reply.CreatedAt.Format("Jan 2, 2006"))
+					}
+					if reply.LikesCount > 0 {
+						content += fmt.Sprintf(" (%d likes)", reply.LikesCount)
+					}
+					content += "**\n>\n"
+
+					// Convert reply body from HTML to markdown
+					replyBody := reply.Body
+					if reply.BodyHTML != "" {
+						if mdReplyBody, err := mdConverter.ConvertString(reply.BodyHTML); err == nil {
+							replyBody = mdReplyBody
+						}
+					}
+					content += "> " + strings.ReplaceAll(replyBody, "\n", "\n> ") + "\n\n"
+				}
+			}
+
+			if i < len(p.Comments)-1 {
+				content += "---\n\n"
+			}
+		}
+	}
+
+	return content, nil
+}
+
 // ToText converts the Post's HTML body to plain text format.
 func (p *Post) ToText(withTitle bool) string {
 	if withTitle {
@@ -75,12 +168,131 @@ func (p *Post) ToText(withTitle bool) string {
 	return html2text.HTML2Text(p.BodyHTML)
 }
 
+// ToTextWithComments converts the Post's HTML body and comments to plain text format.
+func (p *Post) ToTextWithComments(withTitle bool) string {
+	content := p.ToText(withTitle)
+
+	if len(p.Comments) > 0 {
+		content += "\n\n---\n\nCOMMENTS\n\n"
+		for i, comment := range p.Comments {
+			content += fmt.Sprintf("%s", comment.User.Name)
+			if comment.User.Handle != "" {
+				content += fmt.Sprintf(" (@%s)", comment.User.Handle)
+			}
+			if !comment.CreatedAt.IsZero() {
+				content += fmt.Sprintf(" - %s", comment.CreatedAt.Format("Jan 2, 2006"))
+			}
+			if comment.LikesCount > 0 {
+				content += fmt.Sprintf(" (%d likes)", comment.LikesCount)
+			}
+			content += "\n\n"
+
+			// Use body text (convert from HTML if needed)
+			commentBody := comment.Body
+			if comment.BodyHTML != "" {
+				commentBody = html2text.HTML2Text(comment.BodyHTML)
+			}
+			content += commentBody + "\n\n"
+
+			// Add replies
+			if len(comment.Replies) > 0 {
+				for _, reply := range comment.Replies {
+					content += fmt.Sprintf("> %s replied:", reply.User.Name)
+					if !reply.CreatedAt.IsZero() {
+						content += fmt.Sprintf(" %s", reply.CreatedAt.Format("Jan 2, 2006"))
+					}
+					if reply.LikesCount > 0 {
+						content += fmt.Sprintf(" (%d likes)", reply.LikesCount)
+					}
+					content += "\n>\n"
+
+					// Use body text (convert from HTML if needed)
+					replyBody := reply.Body
+					if reply.BodyHTML != "" {
+						replyBody = html2text.HTML2Text(reply.BodyHTML)
+					}
+					content += "> " + strings.ReplaceAll(replyBody, "\n", "\n> ") + "\n\n"
+				}
+			}
+
+			if i < len(p.Comments)-1 {
+				content += "---\n\n"
+			}
+		}
+	}
+
+	return content
+}
+
 // ToHTML returns the Post's HTML body as-is or with an optional title header.
 func (p *Post) ToHTML(withTitle bool) string {
 	if withTitle {
 		return fmt.Sprintf("<h1>%s</h1>\n\n%s", p.Title, p.BodyHTML)
 	}
 	return p.BodyHTML
+}
+
+// ToHTMLWithComments returns the Post's HTML body with comments included.
+func (p *Post) ToHTMLWithComments(withTitle bool) string {
+	content := p.ToHTML(withTitle)
+
+	if len(p.Comments) > 0 {
+		content += "\n\n<hr>\n\n<h2>Comments</h2>\n\n"
+		for i, comment := range p.Comments {
+			content += fmt.Sprintf("<div class=\"comment\">\n")
+			content += fmt.Sprintf("<h3>%s", comment.User.Name)
+			if comment.User.Handle != "" {
+				content += fmt.Sprintf(" <small>(@%s)</small>", comment.User.Handle)
+			}
+			if !comment.CreatedAt.IsZero() {
+				content += fmt.Sprintf(" <small>- %s</small>", comment.CreatedAt.Format("Jan 2, 2006"))
+			}
+			if comment.LikesCount > 0 {
+				content += fmt.Sprintf(" <small>(%d likes)</small>", comment.LikesCount)
+			}
+			content += "</h3>\n"
+
+			// Use HTML body if available, otherwise plain text
+			commentBody := comment.BodyHTML
+			if commentBody == "" {
+				commentBody = strings.ReplaceAll(comment.Body, "\n", "<br>")
+			}
+			content += fmt.Sprintf("<div class=\"comment-body\">%s</div>\n", commentBody)
+
+			// Add replies
+			if len(comment.Replies) > 0 {
+				content += "<div class=\"replies\">\n"
+				for _, reply := range comment.Replies {
+					content += fmt.Sprintf("<blockquote class=\"reply\">\n")
+					content += fmt.Sprintf("<p><strong>%s replied:</strong>", reply.User.Name)
+					if !reply.CreatedAt.IsZero() {
+						content += fmt.Sprintf(" %s", reply.CreatedAt.Format("Jan 2, 2006"))
+					}
+					if reply.LikesCount > 0 {
+						content += fmt.Sprintf(" (%d likes)", reply.LikesCount)
+					}
+					content += "</p>\n"
+
+					// Use HTML body if available, otherwise plain text
+					replyBody := reply.BodyHTML
+					if replyBody == "" {
+						replyBody = strings.ReplaceAll(reply.Body, "\n", "<br>")
+					}
+					content += fmt.Sprintf("<p>%s</p>\n", replyBody)
+					content += "</blockquote>\n"
+				}
+				content += "</div>\n"
+			}
+
+			content += "</div>\n"
+
+			if i < len(p.Comments)-1 {
+				content += "<hr>\n"
+			}
+		}
+	}
+
+	return content
 }
 
 // ToJSON converts the Post to a JSON string.
@@ -106,13 +318,40 @@ func (p *Post) contentForFormat(format string, withTitle bool) (string, error) {
 	}
 }
 
+// contentForFormatWithComments returns the content of a post with comments in the specified format.
+func (p *Post) contentForFormatWithComments(format string, withTitle bool) (string, error) {
+	switch format {
+	case "html":
+		return p.ToHTMLWithComments(withTitle), nil
+	case "md":
+		return p.ToMDWithComments(withTitle)
+	case "txt":
+		return p.ToTextWithComments(withTitle), nil
+	default:
+		return "", fmt.Errorf("unknown format: %s", format)
+	}
+}
+
 // WriteToFile writes the Post's content to a file in the specified format (html, md, or txt).
 func (p *Post) WriteToFile(path string, format string, addSourceURL bool) error {
+	return p.WriteToFileWithOptions(path, format, addSourceURL, false)
+}
+
+// WriteToFileWithOptions writes the Post's content to a file with options for including comments.
+func (p *Post) WriteToFileWithOptions(path string, format string, addSourceURL bool, includeComments bool) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return err
 	}
 
-	content, err := p.contentForFormat(format, true)
+	var content string
+	var err error
+
+	if includeComments {
+		content, err = p.contentForFormatWithComments(format, true)
+	} else {
+		content, err = p.contentForFormat(format, true)
+	}
+
 	if err != nil {
 		return err
 	}
@@ -131,15 +370,30 @@ func (p *Post) WriteToFile(path string, format string, addSourceURL bool) error 
 }
 
 // WriteToFileWithImages writes the Post's content to a file with optional image downloading
-func (p *Post) WriteToFileWithImages(ctx context.Context, path string, format string, addSourceURL bool, 
-	downloadImages bool, imageQuality ImageQuality, imagesDir string, 
+func (p *Post) WriteToFileWithImages(ctx context.Context, path string, format string, addSourceURL bool,
+	downloadImages bool, imageQuality ImageQuality, imagesDir string,
 	downloadFiles bool, fileExtensions []string, filesDir string, fetcher *Fetcher) (*ImageDownloadResult, error) {
-	
+	return p.WriteToFileWithImagesAndComments(ctx, path, format, addSourceURL, downloadImages, imageQuality, imagesDir, downloadFiles, fileExtensions, filesDir, fetcher, false)
+}
+
+// WriteToFileWithImagesAndComments writes the Post's content to a file with optional image downloading and comments
+func (p *Post) WriteToFileWithImagesAndComments(ctx context.Context, path string, format string, addSourceURL bool,
+	downloadImages bool, imageQuality ImageQuality, imagesDir string,
+	downloadFiles bool, fileExtensions []string, filesDir string, fetcher *Fetcher, includeComments bool) (*ImageDownloadResult, error) {
+
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return nil, err
 	}
 
-	content, err := p.contentForFormat(format, true)
+	var content string
+	var err error
+
+	if includeComments {
+		content, err = p.contentForFormatWithComments(format, true)
+	} else {
+		content, err = p.contentForFormat(format, true)
+	}
+
 	if err != nil {
 		return nil, err
 	}
@@ -368,7 +622,154 @@ func (e *Extractor) ExtractPost(ctx context.Context, pageUrl string) (Post, erro
 		}
 	}
 
+	// Extract comments from window._preloads data
+	comments, err := extractCommentsFromHTML(body)
+	if err == nil {
+		p.Comments = comments
+		p.CommentsCount = len(comments)
+	}
+
 	return p, nil
+}
+
+// extractCommentsFromHTML extracts comments from window._preloads data in HTML
+func extractCommentsFromHTML(body io.Reader) ([]Comment, error) {
+	// Read the HTML content
+	htmlBytes, err := io.ReadAll(body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read HTML: %w", err)
+	}
+	htmlContent := string(htmlBytes)
+
+	// Find window._preloads data
+	preloadsStart := strings.Index(htmlContent, "window._preloads")
+	if preloadsStart == -1 {
+		return nil, errors.New("no window._preloads found")
+	}
+
+	// Find the JSON.parse call
+	jsonParseStart := strings.Index(htmlContent[preloadsStart:], "JSON.parse(\"")
+	if jsonParseStart == -1 {
+		return nil, errors.New("no JSON.parse found in window._preloads")
+	}
+	jsonParseStart += preloadsStart + len("JSON.parse(\"")
+
+	// Find the end of the JSON string
+	jsonEnd := strings.Index(htmlContent[jsonParseStart:], "\")")
+	if jsonEnd == -1 {
+		return nil, errors.New("could not find end of JSON string")
+	}
+	jsonEnd += jsonParseStart
+
+	// Extract and unescape the JSON
+	jsonStr := htmlContent[jsonParseStart:jsonEnd]
+	unesescapedJSON, err := jsonUnescape(jsonStr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unescape JSON: %w", err)
+	}
+
+	// Parse the JSON to get the preloads data
+	var preloadsData map[string]interface{}
+	if err := json.Unmarshal([]byte(unesescapedJSON), &preloadsData); err != nil {
+		return nil, fmt.Errorf("failed to parse preloads JSON: %w", err)
+	}
+
+	// Extract comments from the preloads data
+	return extractCommentsFromPreloads(preloadsData)
+}
+
+// jsonUnescape unescapes a JSON string
+func jsonUnescape(s string) (string, error) {
+	var result string
+	err := json.Unmarshal([]byte("\""+s+"\""), &result)
+	return result, err
+}
+
+// extractCommentsFromPreloads extracts comments from the preloads data structure
+func extractCommentsFromPreloads(preloads map[string]interface{}) ([]Comment, error) {
+	// Navigate to the comments data
+	postData, ok := preloads["post"].(map[string]interface{})
+	if !ok {
+		return nil, errors.New("post data not found in preloads")
+	}
+
+	commentsData, ok := postData["comments"].([]interface{})
+	if !ok {
+		return nil, errors.New("comments not found in post data")
+	}
+
+	var comments []Comment
+	for _, commentData := range commentsData {
+		commentMap, ok := commentData.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		comment, err := parseComment(commentMap)
+		if err != nil {
+			continue // Skip invalid comments
+		}
+
+		comments = append(comments, comment)
+	}
+
+	return comments, nil
+}
+
+// parseComment parses a single comment from the comment map
+func parseComment(commentMap map[string]interface{}) (Comment, error) {
+	var comment Comment
+
+	// Parse basic fields
+	if id, ok := commentMap["id"].(float64); ok {
+		comment.Id = int(id)
+	}
+	if postId, ok := commentMap["post_id"].(float64); ok {
+		comment.PostId = int(postId)
+	}
+	if body, ok := commentMap["body"].(string); ok {
+		comment.Body = body
+	}
+	if bodyHTML, ok := commentMap["body_html"].(string); ok {
+		comment.BodyHTML = bodyHTML
+	}
+	if likesCount, ok := commentMap["reaction_count"].(float64); ok {
+		comment.LikesCount = int(likesCount)
+	}
+
+	// Parse dates
+	if dateStr, ok := commentMap["date"].(string); ok {
+		if parsedDate, err := time.Parse(time.RFC3339, dateStr); err == nil {
+			comment.CreatedAt = parsedDate
+			comment.UpdatedAt = parsedDate
+		}
+	}
+
+	// Parse user information
+	if userMap, ok := commentMap["metadata"].(map[string]interface{}); ok {
+		if name, ok := userMap["name"].(string); ok {
+			comment.User.Name = name
+		}
+		if handle, ok := userMap["user_slug"].(string); ok {
+			comment.User.Handle = handle
+		}
+		if photoURL, ok := userMap["photo_url"].(string); ok {
+			comment.User.PhotoURL = photoURL
+		}
+	}
+
+	// Parse children (replies)
+	if children, ok := commentMap["children"].([]interface{}); ok {
+		for _, childData := range children {
+			if childMap, ok := childData.(map[string]interface{}); ok {
+				if childComment, err := parseComment(childMap); err == nil {
+					comment.Replies = append(comment.Replies, childComment)
+				}
+			}
+		}
+	}
+
+	return comment, nil
 }
 
 type DateFilterFunc func(string) bool

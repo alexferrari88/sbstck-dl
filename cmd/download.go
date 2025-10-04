@@ -15,18 +15,19 @@ import (
 
 // downloadCmd represents the download command
 var (
-	downloadUrl    string
-	format         string
-	outputFolder   string
-	dryRun         bool
-	addSourceURL   bool
-	downloadImages bool
-	imageQuality   string
-	imagesDir      string
-	downloadFiles  bool
-	fileExtensions string
-	filesDir       string
-	createArchive  bool
+	downloadUrl      string
+	format           string
+	outputFolder     string
+	dryRun           bool
+	addSourceURL     bool
+	downloadImages   bool
+	imageQuality     string
+	imagesDir        string
+	downloadFiles    bool
+	fileExtensions   string
+	filesDir         string
+	createArchive    bool
+	downloadComments bool
 	downloadCmd    = &cobra.Command{
 		Use:   "download",
 		Short: "Download individual posts or the entire public archive",
@@ -74,16 +75,22 @@ var (
 					if fileExtensions != "" {
 						fileExtensionsSlice = strings.Split(strings.ReplaceAll(fileExtensions, " ", ""), ",")
 					}
-					imageResult, err := post.WriteToFileWithImages(ctx, path, format, addSourceURL, downloadImages, imageQualityEnum, imagesDir, downloadFiles, fileExtensionsSlice, filesDir, fetcher)
+					imageResult, err := post.WriteToFileWithImagesAndComments(ctx, path, format, addSourceURL, downloadImages, imageQualityEnum, imagesDir, downloadFiles, fileExtensionsSlice, filesDir, fetcher, downloadComments)
 					if err != nil {
 						log.Printf("Error writing file %s: %v\n", path, err)
 					} else if verbose && imageResult.Success > 0 {
 						fmt.Printf("Downloaded %d images (%d failed) for post %s\n", imageResult.Success, imageResult.Failed, post.Slug)
 					}
+					if verbose && downloadComments && post.CommentsCount > 0 {
+						fmt.Printf("Downloaded %d comments for post %s\n", post.CommentsCount, post.Slug)
+					}
 				} else {
-					err = post.WriteToFile(path, format, addSourceURL)
+					err = post.WriteToFileWithOptions(path, format, addSourceURL, downloadComments)
 					if err != nil {
 						log.Printf("Error writing file %s: %v\n", path, err)
+					}
+					if verbose && downloadComments && post.CommentsCount > 0 {
+						fmt.Printf("Downloaded %d comments for post %s\n", post.CommentsCount, post.Slug)
 					}
 				}
 
@@ -166,16 +173,22 @@ var (
 						if fileExtensions != "" {
 							fileExtensionsSlice = strings.Split(strings.ReplaceAll(fileExtensions, " ", ""), ",")
 						}
-						imageResult, err := post.WriteToFileWithImages(ctx, path, format, addSourceURL, downloadImages, imageQualityEnum, imagesDir, downloadFiles, fileExtensionsSlice, filesDir, fetcher)
+						imageResult, err := post.WriteToFileWithImagesAndComments(ctx, path, format, addSourceURL, downloadImages, imageQualityEnum, imagesDir, downloadFiles, fileExtensionsSlice, filesDir, fetcher, downloadComments)
 						if err != nil {
 							log.Printf("Error writing file %s: %v\n", path, err)
 						} else if verbose && imageResult.Success > 0 {
 							fmt.Printf("Downloaded %d images (%d failed) for post %s\n", imageResult.Success, imageResult.Failed, post.Slug)
 						}
+						if verbose && downloadComments && post.CommentsCount > 0 {
+							fmt.Printf("Downloaded %d comments for post %s\n", post.CommentsCount, post.Slug)
+						}
 					} else {
-						err = post.WriteToFile(path, format, addSourceURL)
+						err = post.WriteToFileWithOptions(path, format, addSourceURL, downloadComments)
 						if err != nil {
 							log.Printf("Error writing file %s: %v\n", path, err)
+						}
+						if verbose && downloadComments && post.CommentsCount > 0 {
+							fmt.Printf("Downloaded %d comments for post %s\n", post.CommentsCount, post.Slug)
 						}
 					}
 
@@ -231,6 +244,7 @@ func init() {
 	downloadCmd.Flags().StringVar(&fileExtensions, "file-extensions", "", "Comma-separated list of file extensions to download (e.g., 'pdf,docx,txt'). If empty, downloads all file types")
 	downloadCmd.Flags().StringVar(&filesDir, "files-dir", "files", "Directory name for downloaded file attachments")
 	downloadCmd.Flags().BoolVar(&createArchive, "create-archive", false, "Create an archive index page linking all downloaded posts")
+	downloadCmd.Flags().BoolVar(&downloadComments, "download-comments", false, "Download post comments and include them in the saved files")
 	downloadCmd.MarkFlagRequired("url")
 }
 
