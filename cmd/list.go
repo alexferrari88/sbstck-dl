@@ -25,7 +25,7 @@ var (
 				fmt.Println("Getting all posts URLs...")
 			}
 			dateFilterfunc := makeDateFilterFunc(beforeDate, afterDate)
-			urls, err := extractor.GetAllPostsURLs(ctx, mainWebsite, dateFilterfunc)
+			urls, err := extractor.GetAllPostsURLs(ctx, mainWebsite, dateFilterfunc, false)
 			if err != nil {
 				log.Fatal(err)
 			}

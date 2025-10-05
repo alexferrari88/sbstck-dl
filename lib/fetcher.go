@@ -260,6 +260,54 @@ func (f *Fetcher) FetchURL(ctx context.Context, url string) (io.ReadCloser, erro
 	return body, err
 }
 
+// ResolveFinalURL resolves the provided URL and returns the final URL after following redirects.
+// It respects the fetcher's rate limiter and proxy/cookie configuration.
+func (f *Fetcher) ResolveFinalURL(ctx context.Context, rawURL string) (string, error) {
+	if err := f.RateLimiter.Wait(ctx); err != nil {
+		return "", err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+	if err != nil {
+		return "", err
+	}
+
+	req.Header.Set("User-Agent", userAgent)
+
+	if f.Cookie != nil {
+		req.AddCookie(f.Cookie)
+	}
+
+	res, err := f.Client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer res.Body.Close()
+
+	if res.StatusCode != http.StatusOK {
+		if res.StatusCode == http.StatusTooManyRequests {
+			retryAfter := defaultRetryAfter
+			if retryAfterStr := res.Header.Get("Retry-After"); retryAfterStr != "" {
+				if seconds, convErr := strconv.Atoi(retryAfterStr); convErr == nil {
+					retryAfter = seconds
+				}
+			}
+			return "", &FetchError{
+				TooManyRequests: true,
+				RetryAfter:      retryAfter,
+				StatusCode:      res.StatusCode,
+			}
+		}
+
+		return "", &FetchError{StatusCode: res.StatusCode}
+	}
+
+	// Drain a small portion of the body to allow connection reuse without downloading the entire payload.
+	_, _ = io.Copy(io.Discard, io.LimitReader(res.Body, 1024))
+
+	return res.Request.URL.String(), nil
+}
+
 // fetch performs the actual HTTP GET request.
 func (f *Fetcher) fetch(ctx context.Context, url string) (io.ReadCloser, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)

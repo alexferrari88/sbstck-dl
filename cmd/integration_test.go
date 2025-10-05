@@ -79,7 +79,7 @@ func TestCommandExecution(t *testing.T) {
 	t.Run("version command", func(t *testing.T) {
 		// Capture stdout
 		var output bytes.Buffer
-		
+
 		// Create a command that executes the version logic
 		cmd := &cobra.Command{
 			Use: "test-version",
@@ -87,7 +87,7 @@ func TestCommandExecution(t *testing.T) {
 				output.WriteString("sbstck-dl v0.4.0\n")
 			},
 		}
-		
+
 		err := cmd.Execute()
 		assert.NoError(t, err)
 		assert.Contains(t, output.String(), "sbstck-dl v0.4.0")
@@ -100,19 +100,19 @@ func TestCommandExecution(t *testing.T) {
 		verbose = false
 		beforeDate = ""
 		afterDate = ""
-		
+
 		// Initialize fetcher and extractor
 		fetcher = lib.NewFetcher()
 		extractor = lib.NewExtractor(fetcher)
 		ctx = context.Background()
-		
+
 		// Create a new command to capture output
 		var output bytes.Buffer
 		cmd := &cobra.Command{
 			Use: "test-list",
 			Run: func(cmd *cobra.Command, args []string) {
 				// Simulate list command logic
-				urls, err := extractor.GetAllPostsURLs(ctx, pubUrl, nil)
+				urls, err := extractor.GetAllPostsURLs(ctx, pubUrl, nil, false)
 				if err != nil {
 					t.Fatalf("Failed to get URLs: %v", err)
 				}
@@ -121,10 +121,10 @@ func TestCommandExecution(t *testing.T) {
 				}
 			},
 		}
-		
+
 		err := cmd.Execute()
 		assert.NoError(t, err)
-		
+
 		// Check that it outputs the post URL
 		assert.Contains(t, output.String(), "https://example.substack.com/p/test-post")
 	})
@@ -132,7 +132,7 @@ func TestCommandExecution(t *testing.T) {
 	// Test single post download
 	t.Run("single post download", func(t *testing.T) {
 		tempDir := t.TempDir()
-		
+
 		// Reset global variables
 		downloadUrl = server.URL + "/p/test-post"
 		outputFolder = tempDir
@@ -140,12 +140,12 @@ func TestCommandExecution(t *testing.T) {
 		dryRun = false
 		verbose = false
 		addSourceURL = false
-		
+
 		// Initialize fetcher and extractor
 		fetcher = lib.NewFetcher()
 		extractor = lib.NewExtractor(fetcher)
 		ctx = context.Background()
-		
+
 		// Create a new command
 		cmd := &cobra.Command{
 			Use: "test-download",
@@ -155,7 +155,7 @@ func TestCommandExecution(t *testing.T) {
 				if err != nil {
 					t.Fatalf("Failed to extract post: %v", err)
 				}
-				
+
 				// Write to file
 				filePath := makePath(post, outputFolder, format)
 				err = post.WriteToFile(filePath, format, addSourceURL)
@@ -164,16 +164,16 @@ func TestCommandExecution(t *testing.T) {
 				}
 			},
 		}
-		
+
 		err := cmd.Execute()
 		assert.NoError(t, err)
-		
+
 		// Check that file was created - use the correct expected format
 		// Since mockPost.PostDate is "2023-01-01" (not RFC3339), convertDateTime will return ""
 		expectedFile := filepath.Join(tempDir, "_test-post.html")
 		_, err = os.Stat(expectedFile)
 		assert.NoError(t, err)
-		
+
 		// Check file content
 		content, err := os.ReadFile(expectedFile)
 		assert.NoError(t, err)
@@ -187,7 +187,7 @@ func TestCommandFlags(t *testing.T) {
 	t.Run("root command flags", func(t *testing.T) {
 		// Test that flags are properly defined
 		cmd := rootCmd
-		
+
 		// Check persistent flags
 		assert.NotNil(t, cmd.PersistentFlags().Lookup("proxy"))
 		assert.NotNil(t, cmd.PersistentFlags().Lookup("verbose"))
@@ -200,7 +200,7 @@ func TestCommandFlags(t *testing.T) {
 
 	t.Run("download command flags", func(t *testing.T) {
 		cmd := downloadCmd
-		
+
 		// Check local flags
 		assert.NotNil(t, cmd.Flags().Lookup("url"))
 		assert.NotNil(t, cmd.Flags().Lookup("format"))
@@ -214,7 +214,7 @@ func TestCommandFlags(t *testing.T) {
 		assert.NotNil(t, cmd.Flags().Lookup("file-extensions"))
 		assert.NotNil(t, cmd.Flags().Lookup("files-dir"))
 		assert.NotNil(t, cmd.Flags().Lookup("create-archive"))
-		
+
 		// Test create-archive flag specifically
 		createArchiveFlag := cmd.Flags().Lookup("create-archive")
 		assert.Equal(t, "bool", createArchiveFlag.Value.Type())
@@ -223,7 +223,7 @@ func TestCommandFlags(t *testing.T) {
 
 	t.Run("list command flags", func(t *testing.T) {
 		cmd := listCmd
-		
+
 		// Check local flags
 		assert.NotNil(t, cmd.Flags().Lookup("url"))
 	})
@@ -258,7 +258,7 @@ func TestErrorHandling(t *testing.T) {
 		fetcher := lib.NewFetcher()
 		extractor := lib.NewExtractor(fetcher)
 		ctx := context.Background()
-		
+
 		_, err := extractor.ExtractPost(ctx, "http://non-existent-server.com/p/test")
 		assert.Error(t, err)
 	})
@@ -275,7 +275,7 @@ func TestErrorHandling(t *testing.T) {
 			Title:    "Test",
 			BodyHTML: "<p>Test</p>",
 		}
-		
+
 		// Try to write to a file with invalid character (null byte forbidden on both Windows and Unix)
 		err := post.WriteToFile("invalid\x00filename.html", "html", false)
 		assert.Error(t, err)
@@ -296,19 +296,19 @@ func TestConfigurations(t *testing.T) {
 	t.Run("with cookie configuration", func(t *testing.T) {
 		// Test cookie creation
 		tests := []struct {
-			name      string
+			name       string
 			cookieName cookieName
 			cookieVal  string
 			expected   string
 		}{
 			{
-				name:      "substack.sid cookie",
+				name:       "substack.sid cookie",
 				cookieName: substackSid,
 				cookieVal:  "test-value",
 				expected:   "substack.sid",
 			},
 			{
-				name:      "connect.sid cookie",
+				name:       "connect.sid cookie",
 				cookieName: connectSid,
 				cookieVal:  "test-value",
 				expected:   "connect.sid",
@@ -325,7 +325,7 @@ func TestConfigurations(t *testing.T) {
 	t.Run("with rate limiting", func(t *testing.T) {
 		// Test that different rate limits are handled
 		rates := []int{1, 2, 5, 10}
-		
+
 		for _, rate := range rates {
 			fetcher := lib.NewFetcher(lib.WithRatePerSecond(rate))
 			assert.NotNil(t, fetcher)
@@ -347,10 +347,10 @@ func TestRealWorldScenarios(t *testing.T) {
 		for i := range urls {
 			urls[i] = fmt.Sprintf("https://example.substack.com/p/post-%d", i)
 		}
-		
+
 		// Test URL parsing performance
 		start := time.Now()
-		
+
 		// Test parsing all URLs
 		validUrls := 0
 		for _, url := range urls {
@@ -358,17 +358,17 @@ func TestRealWorldScenarios(t *testing.T) {
 				validUrls++
 			}
 		}
-		
+
 		duration := time.Since(start)
-		
-		assert.Equal(t, len(urls), validUrls) // All should be valid
+
+		assert.Equal(t, len(urls), validUrls)   // All should be valid
 		assert.Less(t, duration, 1*time.Second) // Should be fast
 	})
 
 	t.Run("concurrent processing", func(t *testing.T) {
 		// Test that concurrent processing works correctly
 		tempDir := t.TempDir()
-		
+
 		// Create multiple posts concurrently
 		posts := make([]lib.Post, 5)
 		for i := range posts {
@@ -379,7 +379,7 @@ func TestRealWorldScenarios(t *testing.T) {
 				BodyHTML: fmt.Sprintf("<p>Content for post %d</p>", i),
 			}
 		}
-		
+
 		// Write all posts concurrently
 		start := time.Now()
 		for i, post := range posts {
@@ -388,14 +388,14 @@ func TestRealWorldScenarios(t *testing.T) {
 			assert.NoError(t, err)
 		}
 		duration := time.Since(start)
-		
+
 		// Verify all files were created
 		for i := range posts {
 			filePath := filepath.Join(tempDir, fmt.Sprintf("post-%d.html", i))
 			_, err := os.Stat(filePath)
 			assert.NoError(t, err)
 		}
-		
+
 		assert.Less(t, duration, 1*time.Second) // Should be fast
 	})
 }
@@ -404,7 +404,7 @@ func TestRealWorldScenarios(t *testing.T) {
 func TestArchiveWorkflow(t *testing.T) {
 	t.Run("single post with archive", func(t *testing.T) {
 		tempDir := t.TempDir()
-		
+
 		// Create a mock post with enhanced fields
 		post := lib.Post{
 			Id:           123,
@@ -417,60 +417,60 @@ func TestArchiveWorkflow(t *testing.T) {
 			CanonicalUrl: "https://example.substack.com/p/test-archive-post",
 			BodyHTML:     "<p>This is a <strong>test</strong> post for archive functionality.</p>",
 		}
-		
+
 		// Simulate the archive workflow
 		archive := lib.NewArchive()
-		
+
 		// Write the post to file (similar to what download command does)
 		filePath := filepath.Join(tempDir, "20230101_103000_test-archive-post.html")
 		err := post.WriteToFile(filePath, "html", false)
 		require.NoError(t, err)
-		
+
 		// Add entry to archive (similar to what download command does)
 		downloadTime, _ := time.Parse(time.RFC3339, "2023-01-10T12:00:00Z")
 		archive.AddEntry(post, filePath, downloadTime)
-		
+
 		// Generate archive in all formats
 		err = archive.GenerateHTML(tempDir)
 		require.NoError(t, err)
-		
+
 		err = archive.GenerateMarkdown(tempDir)
 		require.NoError(t, err)
-		
+
 		err = archive.GenerateText(tempDir)
 		require.NoError(t, err)
-		
+
 		// Verify all archive files were created
 		assert.FileExists(t, filepath.Join(tempDir, "index.html"))
 		assert.FileExists(t, filepath.Join(tempDir, "index.md"))
 		assert.FileExists(t, filepath.Join(tempDir, "index.txt"))
-		
+
 		// Verify HTML archive content
 		htmlContent, err := os.ReadFile(filepath.Join(tempDir, "index.html"))
 		require.NoError(t, err)
 		htmlStr := string(htmlContent)
-		
+
 		assert.Contains(t, htmlStr, "Test Archive Post")
 		assert.Contains(t, htmlStr, "This is a test subtitle")
 		assert.Contains(t, htmlStr, "https://example.com/cover.jpg")
 		assert.Contains(t, htmlStr, "20230101_103000_test-archive-post.html") // Relative path
-		assert.Contains(t, htmlStr, "January 1, 2023") // Formatted date
-		
+		assert.Contains(t, htmlStr, "January 1, 2023")                        // Formatted date
+
 		// Verify Markdown archive content
 		mdContent, err := os.ReadFile(filepath.Join(tempDir, "index.md"))
 		require.NoError(t, err)
 		mdStr := string(mdContent)
-		
+
 		assert.Contains(t, mdStr, "# Substack Archive")
 		assert.Contains(t, mdStr, "## [Test Archive Post](20230101_103000_test-archive-post.html)")
 		assert.Contains(t, mdStr, "*This is a test subtitle*")
 		assert.Contains(t, mdStr, "![Cover Image](https://example.com/cover.jpg)")
-		
+
 		// Verify Text archive content
 		txtContent, err := os.ReadFile(filepath.Join(tempDir, "index.txt"))
 		require.NoError(t, err)
 		txtStr := string(txtContent)
-		
+
 		assert.Contains(t, txtStr, "SUBSTACK ARCHIVE")
 		assert.Contains(t, txtStr, "Title: Test Archive Post")
 		assert.Contains(t, txtStr, "File: 20230101_103000_test-archive-post.html")
@@ -479,10 +479,10 @@ func TestArchiveWorkflow(t *testing.T) {
 
 	t.Run("multiple posts with archive", func(t *testing.T) {
 		tempDir := t.TempDir()
-		
+
 		archive := lib.NewArchive()
 		downloadTime := time.Now()
-		
+
 		// Create multiple posts with different dates
 		posts := []lib.Post{
 			{
@@ -497,7 +497,7 @@ func TestArchiveWorkflow(t *testing.T) {
 			{
 				Id:           2,
 				Title:        "Second Post",
-				Slug:         "second-post", 
+				Slug:         "second-post",
 				PostDate:     "2023-01-02T10:00:00Z",
 				Description:  "Second description",
 				CoverImage:   "https://example.com/cover2.jpg",
@@ -514,33 +514,33 @@ func TestArchiveWorkflow(t *testing.T) {
 				BodyHTML:     "<p>Third post content</p>",
 			},
 		}
-		
+
 		// Write posts and add to archive
 		for i, post := range posts {
 			filePath := filepath.Join(tempDir, fmt.Sprintf("post-%d.html", i+1))
 			err := post.WriteToFile(filePath, "html", false)
 			require.NoError(t, err)
-			
+
 			archive.AddEntry(post, filePath, downloadTime.Add(time.Duration(i)*time.Hour))
 		}
-		
+
 		// Generate archive
 		err := archive.GenerateHTML(tempDir)
 		require.NoError(t, err)
-		
+
 		// Verify content ordering (newest first)
 		htmlContent, err := os.ReadFile(filepath.Join(tempDir, "index.html"))
 		require.NoError(t, err)
 		htmlStr := string(htmlContent)
-		
+
 		// Find positions of post titles to verify ordering
 		thirdPos := strings.Index(htmlStr, "Third Post")
 		secondPos := strings.Index(htmlStr, "Second Post")
 		firstPos := strings.Index(htmlStr, "First Post")
-		
+
 		assert.True(t, thirdPos < secondPos, "Third Post should appear before Second Post")
 		assert.True(t, secondPos < firstPos, "Second Post should appear before First Post")
-		
+
 		// Verify all posts are included
 		assert.Contains(t, htmlStr, "First subtitle")
 		assert.Contains(t, htmlStr, "Second description") // Fallback to description
@@ -550,7 +550,7 @@ func TestArchiveWorkflow(t *testing.T) {
 
 	t.Run("archive with different formats", func(t *testing.T) {
 		tempDir := t.TempDir()
-		
+
 		post := lib.Post{
 			Id:           100,
 			Title:        "Format Test Post",
@@ -560,26 +560,26 @@ func TestArchiveWorkflow(t *testing.T) {
 			CanonicalUrl: "https://example.substack.com/p/format-test-post",
 			BodyHTML:     "<p>Testing <strong>different</strong> formats.</p>",
 		}
-		
+
 		// Test with different output formats
 		formats := []string{"html", "md", "txt"}
-		
+
 		for _, format := range formats {
 			t.Run(fmt.Sprintf("format_%s", format), func(t *testing.T) {
 				formatDir := filepath.Join(tempDir, format)
 				err := os.MkdirAll(formatDir, 0755)
 				require.NoError(t, err)
-				
+
 				archive := lib.NewArchive()
-				
+
 				// Write post in the specified format
 				filePath := filepath.Join(formatDir, fmt.Sprintf("post.%s", format))
 				err = post.WriteToFile(filePath, format, false)
 				require.NoError(t, err)
-				
+
 				// Add to archive and generate
 				archive.AddEntry(post, filePath, time.Now())
-				
+
 				switch format {
 				case "html":
 					err = archive.GenerateHTML(formatDir)
@@ -589,11 +589,11 @@ func TestArchiveWorkflow(t *testing.T) {
 					err = archive.GenerateText(formatDir)
 				}
 				require.NoError(t, err)
-				
+
 				// Verify archive file exists
 				indexPath := filepath.Join(formatDir, fmt.Sprintf("index.%s", format))
 				assert.FileExists(t, indexPath)
-				
+
 				// Verify content contains the post
 				content, err := os.ReadFile(indexPath)
 				require.NoError(t, err)
