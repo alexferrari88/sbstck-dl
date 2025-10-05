@@ -42,7 +42,7 @@ const userAgent = "sbstck-dl/0.1"
 type Fetcher struct {
 	Client      *http.Client
 	RateLimiter *rate.Limiter
-	BackoffCfg  backoff.BackOff
+	backoffFn   func() backoff.BackOff
 	Cookie      *http.Cookie
 	MaxWorkers  int
 }
@@ -165,10 +165,26 @@ func NewFetcher(opts ...FetcherOption) *Fetcher {
 		Timeout:   options.Timeout,
 	}
 
+	backoffFactory := func() backoff.BackOff {
+		if exp, ok := options.BackOffConfig.(*backoff.ExponentialBackOff); ok {
+			copy := *exp
+			copy.Reset()
+			return &copy
+		}
+		if options.BackOffConfig != nil {
+			b := makeDefaultBackoff()
+			b.Reset()
+			return b
+		}
+		b := makeDefaultBackoff()
+		b.Reset()
+		return b
+	}
+
 	return &Fetcher{
 		Client:      client,
 		RateLimiter: rate.NewLimiter(rate.Limit(options.RatePerSecond), options.Burst),
-		BackoffCfg:  options.BackOffConfig,
+		backoffFn:   backoffFactory,
 		Cookie:      options.Cookie,
 		MaxWorkers:  options.MaxWorkers,
 	}
@@ -223,6 +239,7 @@ func (f *Fetcher) FetchURL(ctx context.Context, url string) (io.ReadCloser, erro
 	var body io.ReadCloser
 	var err error
 	var retryCounter int
+	backoffCfg := f.backoffFn()
 
 	operation := func() error {
 		if retryCounter >= defaultMaxRetryCount {
@@ -250,7 +267,7 @@ func (f *Fetcher) FetchURL(ctx context.Context, url string) (io.ReadCloser, erro
 	// Use backoff with notification for logging
 	err = backoff.RetryNotify(
 		operation,
-		f.BackoffCfg,
+		backoffCfg,
 		func(err error, d time.Duration) {
 			// This could be connected to a logger
 			_ = err // Avoid unused variable error
@@ -258,6 +275,54 @@ func (f *Fetcher) FetchURL(ctx context.Context, url string) (io.ReadCloser, erro
 	)
 
 	return body, err
+}
+
+// ResolveFinalURL resolves the provided URL and returns the final URL after following redirects.
+// It respects the fetcher's rate limiter and proxy/cookie configuration.
+func (f *Fetcher) ResolveFinalURL(ctx context.Context, rawURL string) (string, error) {
+	if err := f.RateLimiter.Wait(ctx); err != nil {
+		return "", err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+	if err != nil {
+		return "", err
+	}
+
+	req.Header.Set("User-Agent", userAgent)
+
+	if f.Cookie != nil {
+		req.AddCookie(f.Cookie)
+	}
+
+	res, err := f.Client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer res.Body.Close()
+
+	if res.StatusCode != http.StatusOK {
+		if res.StatusCode == http.StatusTooManyRequests {
+			retryAfter := defaultRetryAfter
+			if retryAfterStr := res.Header.Get("Retry-After"); retryAfterStr != "" {
+				if seconds, convErr := strconv.Atoi(retryAfterStr); convErr == nil {
+					retryAfter = seconds
+				}
+			}
+			return "", &FetchError{
+				TooManyRequests: true,
+				RetryAfter:      retryAfter,
+				StatusCode:      res.StatusCode,
+			}
+		}
+
+		return "", &FetchError{StatusCode: res.StatusCode}
+	}
+
+	// Drain a small portion of the body to allow connection reuse without downloading the entire payload.
+	_, _ = io.Copy(io.Discard, io.LimitReader(res.Body, 1024))
+
+	return res.Request.URL.String(), nil
 }
 
 // fetch performs the actual HTTP GET request.

@@ -15,35 +15,50 @@ import (
 
 // downloadCmd represents the download command
 var (
-	downloadUrl    string
-	format         string
-	outputFolder   string
-	dryRun         bool
-	addSourceURL   bool
-	downloadImages bool
-	imageQuality   string
-	imagesDir      string
-	downloadFiles  bool
-	fileExtensions string
-	filesDir       string
-	createArchive  bool
-	downloadCmd    = &cobra.Command{
+	downloadUrl      string
+	format           string
+	outputFolder     string
+	dryRun           bool
+	addSourceURL     bool
+	downloadImages   bool
+	imageQuality     string
+	imagesDir        string
+	downloadFiles    bool
+	fileExtensions   string
+	filesDir         string
+	createArchive    bool
+	downloadComments bool
+	includeNotes     bool
+	downloadCmd      = &cobra.Command{
 		Use:   "download",
 		Short: "Download individual posts or the entire public archive",
 		Long:  `You can provide the url of a single post or the main url of the Substack you want to download.`,
 		Run: func(cmd *cobra.Command, args []string) {
 			startTime := time.Now()
-			
+
+			normalizedURL, err := lib.NormalizeURL(ctx, fetcher, downloadUrl)
+			if err != nil {
+				log.Fatalln(err)
+			}
+			if verbose && normalizedURL != downloadUrl {
+				fmt.Printf("Resolved final URL: %s\n", normalizedURL)
+			}
+			downloadUrl = normalizedURL
+
 			// Create archive instance if flag is set
 			var archive *lib.Archive
 			if createArchive {
 				archive = lib.NewArchive()
 			}
 
-			// if url contains "/p/", we are downloading a single post
-			if strings.Contains(downloadUrl, "/p/") {
+			// if url contains "/p/" or "/note/", we are downloading a single post or note
+			if strings.Contains(downloadUrl, "/p/") || strings.Contains(downloadUrl, "/note/") {
+				contentType := "post"
+				if strings.Contains(downloadUrl, "/note/") {
+					contentType = "note"
+				}
 				if verbose {
-					fmt.Printf("Downloading post %s\n", downloadUrl)
+					fmt.Printf("Downloading %s %s\n", contentType, downloadUrl)
 				}
 				if dryRun {
 					fmt.Println("Dry run, exiting...")
@@ -59,7 +74,11 @@ var (
 				}
 				downloadTime := time.Since(startTime)
 				if verbose {
-					fmt.Printf("Downloaded post %s in %s\n", downloadUrl, downloadTime)
+					fmt.Printf("Downloaded %s %s in %s\n", contentType, downloadUrl, downloadTime)
+					if contentType == "note" {
+						fmt.Printf("Note details: ID=%d, Title='%s', Slug='%s', Type='%s'\n", post.Id, post.Title, post.Slug, post.Type)
+						fmt.Printf("Note comments count: %d\n", post.CommentsCount)
+					}
 				}
 
 				path := makePath(post, outputFolder, format)
@@ -74,16 +93,30 @@ var (
 					if fileExtensions != "" {
 						fileExtensionsSlice = strings.Split(strings.ReplaceAll(fileExtensions, " ", ""), ",")
 					}
-					imageResult, err := post.WriteToFileWithImages(ctx, path, format, addSourceURL, downloadImages, imageQualityEnum, imagesDir, downloadFiles, fileExtensionsSlice, filesDir, fetcher)
+					imageResult, err := post.WriteToFileWithImagesAndComments(ctx, path, format, addSourceURL, downloadImages, imageQualityEnum, imagesDir, downloadFiles, fileExtensionsSlice, filesDir, fetcher, downloadComments)
 					if err != nil {
 						log.Printf("Error writing file %s: %v\n", path, err)
 					} else if verbose && imageResult.Success > 0 {
 						fmt.Printf("Downloaded %d images (%d failed) for post %s\n", imageResult.Success, imageResult.Failed, post.Slug)
 					}
+					if verbose && downloadComments {
+						if post.CommentsCount > 0 {
+							fmt.Printf("Downloaded %d comments for %s %s\n", post.CommentsCount, contentType, post.Slug)
+						} else {
+							fmt.Printf("No comments found for %s %s\n", contentType, post.Slug)
+						}
+					}
 				} else {
-					err = post.WriteToFile(path, format, addSourceURL)
+					err = post.WriteToFileWithOptions(path, format, addSourceURL, downloadComments)
 					if err != nil {
 						log.Printf("Error writing file %s: %v\n", path, err)
+					}
+					if verbose && downloadComments {
+						if post.CommentsCount > 0 {
+							fmt.Printf("Downloaded %d comments for %s %s\n", post.CommentsCount, contentType, post.Slug)
+						} else {
+							fmt.Printf("No comments found for %s %s\n", contentType, post.Slug)
+						}
 					}
 				}
 
@@ -99,7 +132,7 @@ var (
 				// we are downloading the entire archive
 				var downloadedPostsCount int
 				dateFilterfunc := makeDateFilterFunc(beforeDate, afterDate)
-				urls, err := extractor.GetAllPostsURLs(ctx, downloadUrl, dateFilterfunc)
+				urls, err := extractor.GetAllPostsURLs(ctx, downloadUrl, dateFilterfunc, includeNotes)
 				urlsCount := len(urls)
 				if err != nil {
 					log.Fatalln(err)
@@ -166,16 +199,22 @@ var (
 						if fileExtensions != "" {
 							fileExtensionsSlice = strings.Split(strings.ReplaceAll(fileExtensions, " ", ""), ",")
 						}
-						imageResult, err := post.WriteToFileWithImages(ctx, path, format, addSourceURL, downloadImages, imageQualityEnum, imagesDir, downloadFiles, fileExtensionsSlice, filesDir, fetcher)
+						imageResult, err := post.WriteToFileWithImagesAndComments(ctx, path, format, addSourceURL, downloadImages, imageQualityEnum, imagesDir, downloadFiles, fileExtensionsSlice, filesDir, fetcher, downloadComments)
 						if err != nil {
 							log.Printf("Error writing file %s: %v\n", path, err)
 						} else if verbose && imageResult.Success > 0 {
 							fmt.Printf("Downloaded %d images (%d failed) for post %s\n", imageResult.Success, imageResult.Failed, post.Slug)
 						}
+						if verbose && downloadComments && post.CommentsCount > 0 {
+							fmt.Printf("Downloaded %d comments for post %s\n", post.CommentsCount, post.Slug)
+						}
 					} else {
-						err = post.WriteToFile(path, format, addSourceURL)
+						err = post.WriteToFileWithOptions(path, format, addSourceURL, downloadComments)
 						if err != nil {
 							log.Printf("Error writing file %s: %v\n", path, err)
+						}
+						if verbose && downloadComments && post.CommentsCount > 0 {
+							fmt.Printf("Downloaded %d comments for post %s\n", post.CommentsCount, post.Slug)
 						}
 					}
 
@@ -195,7 +234,7 @@ var (
 				if verbose {
 					fmt.Printf("Generating archive page in %s format...\n", format)
 				}
-				
+
 				var archiveErr error
 				switch format {
 				case "html":
@@ -207,7 +246,7 @@ var (
 				default:
 					archiveErr = fmt.Errorf("unknown format for archive: %s", format)
 				}
-				
+
 				if archiveErr != nil {
 					log.Printf("Error generating archive page: %v\n", archiveErr)
 				} else if verbose {
@@ -231,6 +270,8 @@ func init() {
 	downloadCmd.Flags().StringVar(&fileExtensions, "file-extensions", "", "Comma-separated list of file extensions to download (e.g., 'pdf,docx,txt'). If empty, downloads all file types")
 	downloadCmd.Flags().StringVar(&filesDir, "files-dir", "files", "Directory name for downloaded file attachments")
 	downloadCmd.Flags().BoolVar(&createArchive, "create-archive", false, "Create an archive index page linking all downloaded posts")
+	downloadCmd.Flags().BoolVar(&downloadComments, "download-comments", false, "Download post comments and include them in the saved files")
+	downloadCmd.Flags().BoolVar(&includeNotes, "include-notes", false, "Include notes in archive downloads (when downloading entire publication)")
 	downloadCmd.MarkFlagRequired("url")
 }
 

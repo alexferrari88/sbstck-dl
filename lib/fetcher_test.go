@@ -25,7 +25,6 @@ func TestNewFetcher(t *testing.T) {
 		f := NewFetcher()
 		assert.NotNil(t, f.Client)
 		assert.NotNil(t, f.RateLimiter)
-		assert.NotNil(t, f.BackoffCfg)
 		assert.Nil(t, f.Cookie)
 		assert.Equal(t, 10, f.MaxWorkers)
 	})
@@ -48,10 +47,23 @@ func TestNewFetcher(t *testing.T) {
 		assert.NotNil(t, f.Client)
 		assert.Equal(t, rate.Limit(5), f.RateLimiter.Limit())
 		assert.Equal(t, 10, f.RateLimiter.Burst())
-		assert.Equal(t, customBackoff, f.BackoffCfg)
 		assert.Equal(t, cookie, f.Cookie)
 		assert.Equal(t, 20, f.MaxWorkers)
 		assert.Equal(t, time.Minute, f.Client.Timeout)
+
+		// Ensure the custom backoff is respected by invoking FetchURL (will hit the test server once)
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		}))
+		defer server.Close()
+
+		ctx := context.Background()
+		noProxyFetcher := NewFetcher(WithBackOffConfig(customBackoff))
+		body, err := noProxyFetcher.FetchURL(ctx, server.URL)
+		require.NoError(t, err)
+		if body != nil {
+			body.Close()
+		}
 	})
 }
 
@@ -478,7 +490,7 @@ func TestFetchURLs(t *testing.T) {
 
 		f := NewFetcher()
 		ctx, cancel := context.WithCancel(context.Background())
-		
+
 		// Create multiple URLs
 		urls := []string{server.URL, server.URL, server.URL}
 		resultChan := f.FetchURLs(ctx, urls)

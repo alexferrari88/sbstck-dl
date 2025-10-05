@@ -154,7 +154,7 @@ func TestPostFormatConversions(t *testing.T) {
 		// Note: html-to-markdown library is quite robust, so we test with extremely malformed HTML
 		problemPost := createSamplePost()
 		problemPost.BodyHTML = "<div><p>Nested without closing</div>"
-		
+
 		// This should still work as the library handles most malformed HTML
 		_, err := problemPost.ToMD(true)
 		assert.NoError(t, err) // The library is quite tolerant
@@ -164,12 +164,12 @@ func TestPostFormatConversions(t *testing.T) {
 		// Create a post that would have issues during JSON marshaling
 		// This is hard to trigger with normal Post struct, but we can test the error path
 		problemPost := createSamplePost()
-		
+
 		// Test with valid data (JSON marshaling rarely fails with valid structs)
 		jsonStr, err := problemPost.ToJSON()
 		assert.NoError(t, err)
 		assert.NotEmpty(t, jsonStr)
-		
+
 		// Verify the JSON is valid
 		var parsedPost Post
 		err = json.Unmarshal([]byte(jsonStr), &parsedPost)
@@ -241,7 +241,7 @@ func TestPostWriteToFile(t *testing.T) {
 	// Test with addSourceURL enabled
 	t.Run("with source URL", func(t *testing.T) {
 		formats := []string{"html", "md", "txt"}
-		
+
 		for _, format := range formats {
 			t.Run(format, func(t *testing.T) {
 				filePath := filepath.Join(tempDir, fmt.Sprintf("test-with-source.%s", format))
@@ -272,7 +272,7 @@ func TestPostWriteToFile(t *testing.T) {
 	t.Run("with source URL but no canonical URL", func(t *testing.T) {
 		postWithoutURL := createSamplePost()
 		postWithoutURL.CanonicalUrl = ""
-		
+
 		filePath := filepath.Join(tempDir, "test-no-url.html")
 		err := postWithoutURL.WriteToFile(filePath, "html", true)
 		require.NoError(t, err)
@@ -285,6 +285,98 @@ func TestPostWriteToFile(t *testing.T) {
 		// Should not contain source URL line
 		assert.NotContains(t, contentStr, "original content")
 	})
+}
+
+func TestPostFormatConversionsWithComments(t *testing.T) {
+	post := createSamplePost()
+	post.Title = "Post With Comments"
+	commentTime := time.Date(2024, 9, 23, 12, 0, 0, 0, time.UTC)
+	replyTime := commentTime.Add(2 * time.Hour)
+	post.Comments = []Comment{
+		{
+			Id:         1,
+			Body:       "Great read!",
+			BodyHTML:   "<p>Great read!</p>",
+			CreatedAt:  commentTime,
+			LikesCount: 3,
+			User: CommentUser{
+				Name:   "Alice",
+				Handle: "alice_handle",
+			},
+			Replies: []Comment{
+				{
+					Id:         2,
+					Body:       "Thanks Alice!",
+					BodyHTML:   "<p>Thanks Alice!</p>",
+					CreatedAt:  replyTime,
+					LikesCount: 1,
+					ParentId:   func() *int { id := 1; return &id }(),
+					User: CommentUser{
+						Name: "Bob",
+					},
+				},
+			},
+		},
+	}
+	post.CommentsCount = countTotalComments(post.Comments)
+
+	htmlContent := post.ToHTMLWithComments(true)
+	assert.Contains(t, htmlContent, "<h2>Comments</h2>")
+	assert.Contains(t, htmlContent, "Great read!")
+	assert.Contains(t, htmlContent, "Bob replied")
+
+	mdContent, err := post.ToMDWithComments(true)
+	require.NoError(t, err)
+	assert.Contains(t, mdContent, "## Comments")
+	assert.Contains(t, mdContent, "### Alice (@alice_handle)")
+	assert.Contains(t, mdContent, "> **Bob replied")
+
+	textContent := post.ToTextWithComments(true)
+	assert.Contains(t, textContent, "COMMENTS")
+	assert.Contains(t, textContent, "Alice (@alice_handle)")
+	assert.Contains(t, textContent, "Bob replied")
+}
+
+func TestPostWriteToFileWithComments(t *testing.T) {
+	post := createSamplePost()
+	post.Title = "Persist Comments"
+	commentTime := time.Date(2024, 10, 1, 8, 30, 0, 0, time.UTC)
+	post.Comments = []Comment{
+		{
+			Id:        11,
+			Body:      "Appreciate the insights",
+			BodyHTML:  "<p>Appreciate the insights</p>",
+			CreatedAt: commentTime,
+			User: CommentUser{
+				Name: "Charlie",
+			},
+		},
+	}
+	post.CommentsCount = 1
+
+	tempDir := t.TempDir()
+	formats := []string{"html", "md", "txt"}
+
+	for _, format := range formats {
+		filePath := filepath.Join(tempDir, fmt.Sprintf("persist-comments.%s", format))
+		err := post.WriteToFileWithOptions(filePath, format, false, true)
+		require.NoError(t, err)
+
+		contentBytes, err := os.ReadFile(filePath)
+		require.NoError(t, err)
+		content := string(contentBytes)
+
+		assert.Contains(t, content, "Charlie")
+		assert.Contains(t, content, "Appreciate the insights")
+
+		if format == "html" {
+			assert.Contains(t, content, "<h2>Comments</h2>")
+		} else if format == "md" {
+			assert.Contains(t, content, "## Comments")
+		} else {
+			assert.Contains(t, content, "COMMENTS")
+		}
+	}
 }
 
 // Test extractJSONString function
@@ -393,6 +485,331 @@ func createSubstackTestServer() (*httptest.Server, map[string]Post) {
 	return server, posts
 }
 
+func TestExtractorFetchCommentsFromAPI(t *testing.T) {
+	post := createSamplePost()
+	post.Id = 99
+	post.Slug = "test-post-api"
+	post.PostDate = "2024-01-01T00:00:00Z"
+
+	apiResponse := map[string]interface{}{
+		"comments": []map[string]interface{}{
+			{
+				"id":             1,
+				"body":           "Top level comment",
+				"post_id":        99,
+				"user_id":        101,
+				"ancestor_path":  "",
+				"type":           "comment",
+				"date":           "2024-01-02T15:04:05Z",
+				"edited_at":      "2024-01-02T16:00:00Z",
+				"reaction_count": 4,
+				"name":           "Alice",
+				"handle":         "alice",
+				"photo_url":      "https://example.com/alice.png",
+				"metadata": map[string]interface{}{
+					"is_author": true,
+				},
+				"children": []map[string]interface{}{
+					{
+						"id":             2,
+						"body":           "Nested reply",
+						"post_id":        99,
+						"user_id":        102,
+						"ancestor_path":  "1",
+						"type":           "comment",
+						"date":           "2024-01-02T16:10:00Z",
+						"reaction_count": 2,
+						"name":           "Bob",
+						"handle":         "bob",
+						"photo_url":      "https://example.com/bob.png",
+						"metadata": map[string]interface{}{
+							"is_author": false,
+						},
+					},
+				},
+			},
+		},
+	}
+	apiBytes, err := json.Marshal(apiResponse)
+	require.NoError(t, err)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/p/test-post-api":
+			w.Header().Set("Content-Type", "text/html")
+			w.Write([]byte(createMockSubstackHTML(post)))
+		case "/api/v1/post/99/comments":
+			w.Header().Set("Content-Type", "application/json")
+			w.Write(apiBytes)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	post.CanonicalUrl = server.URL + "/p/test-post-api"
+
+	fetcher := NewFetcher()
+	extractor := NewExtractor(fetcher)
+	ctx := context.Background()
+
+	resultPost, err := extractor.ExtractPost(ctx, post.CanonicalUrl)
+	require.NoError(t, err)
+	require.Len(t, resultPost.Comments, 1)
+	assert.Equal(t, 2, resultPost.CommentsCount)
+
+	comment := resultPost.Comments[0]
+	assert.Equal(t, 1, comment.Id)
+	assert.Equal(t, 4, comment.LikesCount)
+	assert.Equal(t, "Alice", comment.User.Name)
+	assert.Equal(t, "alice", comment.User.Handle)
+	assert.True(t, comment.User.IsSubstack)
+	assert.False(t, comment.CreatedAt.IsZero())
+	assert.NotNil(t, comment.EditedAt)
+	assert.Equal(t, 1, len(comment.Replies))
+
+	reply := comment.Replies[0]
+	assert.Equal(t, 2, reply.Id)
+	assert.Equal(t, "Bob", reply.User.Name)
+	if reply.ParentId == nil {
+		t.Fatalf("expected parent id to be set")
+	}
+	assert.Equal(t, 1, *reply.ParentId)
+	assert.Equal(t, 2, reply.LikesCount)
+}
+
+func TestExtractorFetchCommentsFallsBackWhenAPIMissesComments(t *testing.T) {
+	post := createSamplePost()
+	post.Id = 12345
+	post.Slug = "comments-mismatch"
+	post.PostDate = "2024-03-01T00:00:00Z"
+	post.CommentsCount = 3
+
+	fullComments := []map[string]interface{}{
+		{
+			"id":             201,
+			"post_id":        post.Id,
+			"body":           "First from HTML",
+			"body_html":      "<p>First from HTML</p>",
+			"reaction_count": 4,
+			"date":           "2024-03-01T10:00:00Z",
+			"metadata": map[string]interface{}{
+				"name":      "Alpha",
+				"user_slug": "alpha",
+				"photo_url": "https://example.com/alpha.png",
+			},
+			"children": []map[string]interface{}{
+				{
+					"id":             202,
+					"post_id":        post.Id,
+					"body":           "Reply from HTML",
+					"body_html":      "<p>Reply from HTML</p>",
+					"reaction_count": 1,
+					"date":           "2024-03-01T11:00:00Z",
+					"metadata": map[string]interface{}{
+						"name":      "Beta",
+						"user_slug": "beta",
+						"photo_url": "https://example.com/beta.png",
+					},
+				},
+			},
+		},
+		{
+			"id":             203,
+			"post_id":        post.Id,
+			"body":           "Second from HTML",
+			"body_html":      "<p>Second from HTML</p>",
+			"reaction_count": 2,
+			"date":           "2024-03-02T09:00:00Z",
+			"metadata": map[string]interface{}{
+				"name":      "Gamma",
+				"user_slug": "gamma",
+				"photo_url": "https://example.com/gamma.png",
+			},
+			"children": []map[string]interface{}{},
+		},
+	}
+
+	preloads := map[string]interface{}{
+		"post": map[string]interface{}{
+			"id":             post.Id,
+			"title":          post.Title,
+			"slug":           post.Slug,
+			"post_date":      post.PostDate,
+			"body_html":      post.BodyHTML,
+			"canonical_url":  "",
+			"comments_count": 3,
+			"comments":       fullComments,
+		},
+	}
+
+	preloadsBytes, err := json.Marshal(preloads)
+	require.NoError(t, err)
+	escapedPreloads := strings.ReplaceAll(string(preloadsBytes), "\"", "\\\"")
+
+	html := fmt.Sprintf(`<!DOCTYPE html>
+<html>
+<head><title>%s</title></head>
+<body>
+<script>
+window._preloads = JSON.parse("%s")
+</script>
+</body>
+</html>`, post.Title, escapedPreloads)
+
+	apiResponse := map[string]interface{}{
+		"comments": []map[string]interface{}{
+			{
+				"id":             201,
+				"post_id":        post.Id,
+				"body":           "First from API",
+				"body_html":      "<p>First from API</p>",
+				"reaction_count": 4,
+				"date":           "2024-03-01T10:00:00Z",
+				"metadata": map[string]interface{}{
+					"name":      "Alpha",
+					"user_slug": "alpha",
+					"photo_url": "https://example.com/alpha.png",
+				},
+				"children": []map[string]interface{}{},
+			},
+		},
+	}
+
+	apiBytes, err := json.Marshal(apiResponse)
+	require.NoError(t, err)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/p/comments-mismatch":
+			w.Header().Set("Content-Type", "text/html")
+			w.Write([]byte(html))
+		case "/api/v1/post/12345/comments":
+			w.Header().Set("Content-Type", "application/json")
+			w.Write(apiBytes)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	post.CanonicalUrl = server.URL + "/p/comments-mismatch"
+
+	fetcher := NewFetcher()
+	extractor := NewExtractor(fetcher)
+	ctx := context.Background()
+
+	resultPost, err := extractor.ExtractPost(ctx, post.CanonicalUrl)
+	require.NoError(t, err)
+
+	assert.Equal(t, 3, resultPost.CommentsCount)
+	assert.Equal(t, 2, len(resultPost.Comments))
+	assert.Equal(t, 3, countTotalComments(resultPost.Comments))
+	if len(resultPost.Comments) > 0 {
+		assert.Equal(t, 1, len(resultPost.Comments[0].Replies))
+	}
+}
+
+func TestExtractorExtractPostFallbackToHTMLComments(t *testing.T) {
+	postID := 77
+	preloads := map[string]interface{}{
+		"post": map[string]interface{}{
+			"id":            postID,
+			"title":         "HTML Comments",
+			"slug":          "html-comments",
+			"post_date":     "2024-02-01T00:00:00Z",
+			"body_html":     "<p>Body from HTML</p>",
+			"canonical_url": "",
+			"comments": []map[string]interface{}{
+				{
+					"id":             10,
+					"post_id":        postID,
+					"body":           "First html comment",
+					"body_html":      "<p>First html comment</p>",
+					"reaction_count": 5,
+					"date":           "2024-02-02T10:00:00Z",
+					"metadata": map[string]interface{}{
+						"name":      "HTMLUser",
+						"user_slug": "html_user",
+						"photo_url": "https://example.com/html.png",
+					},
+					"children": []map[string]interface{}{
+						{
+							"id":             11,
+							"post_id":        postID,
+							"body":           "Nested html reply",
+							"body_html":      "<p>Nested html reply</p>",
+							"reaction_count": 1,
+							"date":           "2024-02-02T11:00:00Z",
+							"metadata": map[string]interface{}{
+								"name":      "Responder",
+								"user_slug": "responder",
+								"photo_url": "https://example.com/reply.png",
+							},
+							"children": []map[string]interface{}{},
+						},
+					},
+				},
+			},
+		},
+	}
+	var htmlContent string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/p/html-comments":
+			w.Header().Set("Content-Type", "text/html")
+			w.Write([]byte(htmlContent))
+		case "/api/v1/post/77/comments":
+			w.WriteHeader(http.StatusInternalServerError)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	postURL := server.URL + "/p/html-comments"
+	preloads["post"].(map[string]interface{})["canonical_url"] = postURL
+
+	preloadsBytes, err := json.Marshal(preloads)
+	require.NoError(t, err)
+	escapedJSON := strings.ReplaceAll(string(preloadsBytes), "\"", "\\\"")
+
+	htmlContent = fmt.Sprintf(`<!DOCTYPE html>
+<html>
+<head><title>HTML Comments</title></head>
+<body>
+<script>
+window._preloads = JSON.parse("%s")
+</script>
+</body>
+</html>`, escapedJSON)
+
+	fetcher := NewFetcher()
+	extractor := NewExtractor(fetcher)
+	ctx := context.Background()
+
+	resultPost, err := extractor.ExtractPost(ctx, postURL)
+	require.NoError(t, err)
+	require.Len(t, resultPost.Comments, 1)
+	assert.Equal(t, 2, resultPost.CommentsCount)
+	assert.Equal(t, "HTML Comments", resultPost.Title)
+
+	comment := resultPost.Comments[0]
+	assert.Equal(t, "HTMLUser", comment.User.Name)
+	assert.Equal(t, "html_user", comment.User.Handle)
+	assert.Equal(t, "First html comment", strings.TrimSpace(comment.Body))
+	assert.Equal(t, 5, comment.LikesCount)
+	assert.Equal(t, 1, len(comment.Replies))
+
+	reply := comment.Replies[0]
+	assert.Equal(t, "Responder", reply.User.Name)
+	assert.Equal(t, "Nested html reply", strings.TrimSpace(reply.Body))
+	assert.Equal(t, 1, reply.LikesCount)
+	assert.Equal(t, 0, len(reply.Replies))
+	assert.False(t, reply.CreatedAt.IsZero())
+}
+
 // Test Extractor.ExtractPost
 func TestExtractorExtractPost(t *testing.T) {
 	// Create test server
@@ -454,7 +871,7 @@ func TestExtractorGetAllPostsURLs(t *testing.T) {
 
 	// Test without filter
 	t.Run("withoutFilter", func(t *testing.T) {
-		urls, err := extractor.GetAllPostsURLs(ctx, server.URL, nil)
+		urls, err := extractor.GetAllPostsURLs(ctx, server.URL, nil, false)
 		require.NoError(t, err)
 
 		// Should find all post URLs
@@ -480,17 +897,17 @@ func TestExtractorGetAllPostsURLs(t *testing.T) {
 			return date > "2023-01-02"
 		}
 
-		urls, err := extractor.GetAllPostsURLs(ctx, server.URL, dateFilter)
+		urls, err := extractor.GetAllPostsURLs(ctx, server.URL, dateFilter, false)
 		require.NoError(t, err)
 
 		// Should get 3 posts (dates 2023-01-03, 2023-01-04, 2023-01-05)
 		assert.Len(t, urls, 3)
-		
+
 		// Verify the filtered URLs are correct
 		for _, url := range urls {
 			// Should contain test-post-3, test-post-4, or test-post-5
-			assert.True(t, strings.Contains(url, "test-post-3") || 
-				strings.Contains(url, "test-post-4") || 
+			assert.True(t, strings.Contains(url, "test-post-3") ||
+				strings.Contains(url, "test-post-4") ||
 				strings.Contains(url, "test-post-5"))
 		}
 	})
@@ -500,13 +917,13 @@ func TestExtractorGetAllPostsURLs(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel() // Cancel immediately
 
-		_, err := extractor.GetAllPostsURLs(ctx, server.URL, nil)
+		_, err := extractor.GetAllPostsURLs(ctx, server.URL, nil, false)
 		assert.Error(t, err)
 	})
 
 	// Test with invalid URL
 	t.Run("invalidURL", func(t *testing.T) {
-		_, err := extractor.GetAllPostsURLs(ctx, "invalid-url", nil)
+		_, err := extractor.GetAllPostsURLs(ctx, "invalid-url", nil, false)
 		assert.Error(t, err)
 	})
 }
@@ -865,7 +1282,7 @@ func TestEnhancedPostExtraction(t *testing.T) {
 	t.Run("SubtitleExtraction", func(t *testing.T) {
 		post := createSamplePost()
 		post.Subtitle = "" // Clear subtitle from JSON to test HTML extraction
-		
+
 		// Create mock HTML with subtitle element
 		html := fmt.Sprintf(`
 <!DOCTYPE html>
@@ -896,7 +1313,7 @@ func TestEnhancedPostExtraction(t *testing.T) {
 
 		extractedPost, err := extractor.ExtractPost(ctx, server.URL)
 		require.NoError(t, err)
-		
+
 		// Verify subtitle was extracted and trimmed
 		assert.Equal(t, "This is the subtitle from HTML", extractedPost.Subtitle)
 	})
@@ -904,7 +1321,7 @@ func TestEnhancedPostExtraction(t *testing.T) {
 	t.Run("CoverImageFromOGTag", func(t *testing.T) {
 		post := createSamplePost()
 		post.CoverImage = "" // Clear cover image from JSON to test og:image extraction
-		
+
 		// Create mock HTML with og:image meta tag
 		html := fmt.Sprintf(`
 <!DOCTYPE html>
@@ -934,7 +1351,7 @@ func TestEnhancedPostExtraction(t *testing.T) {
 
 		extractedPost, err := extractor.ExtractPost(ctx, server.URL)
 		require.NoError(t, err)
-		
+
 		// Verify cover image was extracted from og:image
 		assert.Equal(t, "https://example.com/og-cover.jpg", extractedPost.CoverImage)
 	})
@@ -942,7 +1359,7 @@ func TestEnhancedPostExtraction(t *testing.T) {
 	t.Run("ExistingCoverImagePreserved", func(t *testing.T) {
 		post := createSamplePost()
 		post.CoverImage = "https://existing.com/image.jpg"
-		
+
 		// Create mock HTML with og:image meta tag (should be ignored)
 		html := fmt.Sprintf(`
 <!DOCTYPE html>
@@ -972,7 +1389,7 @@ func TestEnhancedPostExtraction(t *testing.T) {
 
 		extractedPost, err := extractor.ExtractPost(ctx, server.URL)
 		require.NoError(t, err)
-		
+
 		// Verify existing cover image was preserved (not overwritten by og:image)
 		assert.Equal(t, "https://existing.com/image.jpg", extractedPost.CoverImage)
 	})
@@ -981,7 +1398,7 @@ func TestEnhancedPostExtraction(t *testing.T) {
 		post := createSamplePost()
 		post.Subtitle = ""
 		post.CoverImage = ""
-		
+
 		// Create mock HTML without subtitle or og:image
 		html := fmt.Sprintf(`
 <!DOCTYPE html>
@@ -1010,7 +1427,7 @@ func TestEnhancedPostExtraction(t *testing.T) {
 
 		extractedPost, err := extractor.ExtractPost(ctx, server.URL)
 		require.NoError(t, err)
-		
+
 		// Verify empty subtitle and cover image remain empty
 		assert.Empty(t, extractedPost.Subtitle)
 		assert.Empty(t, extractedPost.CoverImage)
@@ -1038,17 +1455,17 @@ func TestArchive(t *testing.T) {
 		post1 := createSamplePost()
 		post1.PostDate = "2023-01-01T00:00:00Z"
 		post1.Title = "First Post"
-		
+
 		post2 := createSamplePost()
 		post2.PostDate = "2023-01-02T00:00:00Z"
 		post2.Title = "Second Post"
-		
+
 		post3 := createSamplePost()
 		post3.PostDate = "2023-01-03T00:00:00Z"
 		post3.Title = "Third Post"
 
 		downloadTime := time.Now()
-		
+
 		// Add entries in random order
 		archive.AddEntry(post2, "post2.html", downloadTime)
 		archive.AddEntry(post1, "post1.html", downloadTime)
@@ -1056,24 +1473,24 @@ func TestArchive(t *testing.T) {
 
 		// Verify entries were added and sorted by date (newest first)
 		assert.Len(t, archive.Entries, 3)
-		assert.Equal(t, "Third Post", archive.Entries[0].Post.Title) // 2023-01-03 (newest)
+		assert.Equal(t, "Third Post", archive.Entries[0].Post.Title)  // 2023-01-03 (newest)
 		assert.Equal(t, "Second Post", archive.Entries[1].Post.Title) // 2023-01-02
-		assert.Equal(t, "First Post", archive.Entries[2].Post.Title) // 2023-01-01 (oldest)
+		assert.Equal(t, "First Post", archive.Entries[2].Post.Title)  // 2023-01-01 (oldest)
 	})
 
 	t.Run("SortingWithInvalidDates", func(t *testing.T) {
 		archive := NewArchive()
-		
+
 		post1 := createSamplePost()
 		post1.PostDate = "invalid-date"
 		post1.Title = "A Post"
-		
+
 		post2 := createSamplePost()
 		post2.PostDate = "also-invalid"
 		post2.Title = "B Post"
-		
+
 		downloadTime := time.Now()
-		
+
 		archive.AddEntry(post2, "post2.html", downloadTime)
 		archive.AddEntry(post1, "post1.html", downloadTime)
 
@@ -1088,9 +1505,9 @@ func TestArchive(t *testing.T) {
 		post := createSamplePost()
 		filePath := "/path/to/post.html"
 		downloadTime := time.Now()
-		
+
 		archive.AddEntry(post, filePath, downloadTime)
-		
+
 		entry := archive.Entries[0]
 		assert.Equal(t, post, entry.Post)
 		assert.Equal(t, filePath, entry.FilePath)
@@ -1104,115 +1521,115 @@ func TestArchivePageGeneration(t *testing.T) {
 	setupTestArchive := func() (*Archive, string) {
 		tempDir, err := os.MkdirTemp("", "archive_test")
 		require.NoError(t, err)
-		
+
 		archive := NewArchive()
-		
+
 		// Create sample posts with different dates and metadata
 		post1 := createSamplePost()
 		post1.PostDate = "2023-01-01T10:30:00Z"
 		post1.Title = "First Post"
 		post1.Subtitle = "A great first post"
 		post1.CoverImage = "https://example.com/cover1.jpg"
-		
+
 		post2 := createSamplePost()
-		post2.PostDate = "2023-01-02T15:45:00Z" 
+		post2.PostDate = "2023-01-02T15:45:00Z"
 		post2.Title = "Second Post"
 		post2.Subtitle = "" // Empty subtitle, should fall back to description
 		post2.Description = "This is the description"
 		post2.CoverImage = ""
-		
+
 		post3 := createSamplePost()
 		post3.PostDate = "2023-01-03T08:15:00Z"
 		post3.Title = "Third Post"
 		post3.Subtitle = ""
 		post3.Description = ""
 		post3.CoverImage = "https://example.com/cover3.jpg"
-		
+
 		downloadTime, _ := time.Parse(time.RFC3339, "2023-01-10T12:00:00Z")
-		
+
 		archive.AddEntry(post1, filepath.Join(tempDir, "post1.html"), downloadTime)
 		archive.AddEntry(post2, filepath.Join(tempDir, "post2.html"), downloadTime.Add(time.Hour))
 		archive.AddEntry(post3, filepath.Join(tempDir, "post3.html"), downloadTime.Add(2*time.Hour))
-		
+
 		return archive, tempDir
 	}
 
 	t.Run("GenerateHTML", func(t *testing.T) {
 		archive, tempDir := setupTestArchive()
 		defer os.RemoveAll(tempDir)
-		
+
 		err := archive.GenerateHTML(tempDir)
 		require.NoError(t, err)
-		
+
 		// Check file was created
 		indexPath := filepath.Join(tempDir, "index.html")
 		assert.FileExists(t, indexPath)
-		
+
 		// Read and verify content
 		content, err := os.ReadFile(indexPath)
 		require.NoError(t, err)
 		htmlContent := string(content)
-		
+
 		// Verify HTML structure
 		assert.Contains(t, htmlContent, "<!DOCTYPE html>")
 		assert.Contains(t, htmlContent, "<title>Substack Archive</title>")
 		assert.Contains(t, htmlContent, "<h1>Substack Archive</h1>")
-		
+
 		// Verify posts are included in correct order (newest first)
 		assert.Contains(t, htmlContent, "Third Post") // Should appear first (newest)
 		assert.Contains(t, htmlContent, "Second Post")
 		assert.Contains(t, htmlContent, "First Post")
-		
+
 		// Verify relative paths
 		assert.Contains(t, htmlContent, "post1.html")
-		assert.Contains(t, htmlContent, "post2.html") 
+		assert.Contains(t, htmlContent, "post2.html")
 		assert.Contains(t, htmlContent, "post3.html")
-		
+
 		// Verify cover images and descriptions
 		assert.Contains(t, htmlContent, "https://example.com/cover1.jpg")
 		assert.Contains(t, htmlContent, "https://example.com/cover3.jpg")
-		assert.Contains(t, htmlContent, "A great first post") // Subtitle
+		assert.Contains(t, htmlContent, "A great first post")      // Subtitle
 		assert.Contains(t, htmlContent, "This is the description") // Fallback description
-		
+
 		// Verify dates are formatted
-		assert.Contains(t, htmlContent, "January 1, 2023") // Formatted publication date
+		assert.Contains(t, htmlContent, "January 1, 2023")        // Formatted publication date
 		assert.Contains(t, htmlContent, "January 10, 2023 12:00") // Formatted download date
 	})
 
 	t.Run("GenerateMarkdown", func(t *testing.T) {
 		archive, tempDir := setupTestArchive()
 		defer os.RemoveAll(tempDir)
-		
+
 		err := archive.GenerateMarkdown(tempDir)
 		require.NoError(t, err)
-		
+
 		// Check file was created
 		indexPath := filepath.Join(tempDir, "index.md")
 		assert.FileExists(t, indexPath)
-		
+
 		// Read and verify content
 		content, err := os.ReadFile(indexPath)
 		require.NoError(t, err)
 		mdContent := string(content)
-		
+
 		// Verify markdown structure
 		assert.Contains(t, mdContent, "# Substack Archive\n\n")
 		assert.Contains(t, mdContent, "## [Third Post](post3.html)") // Newest first
 		assert.Contains(t, mdContent, "## [Second Post](post2.html)")
 		assert.Contains(t, mdContent, "## [First Post](post1.html)")
-		
+
 		// Verify metadata format
 		assert.Contains(t, mdContent, "**Published:** January 1, 2023")
 		assert.Contains(t, mdContent, "**Downloaded:** January 10, 2023 12:00")
-		
+
 		// Verify cover image markdown syntax
 		assert.Contains(t, mdContent, "![Cover Image](https://example.com/cover1.jpg)")
 		assert.Contains(t, mdContent, "![Cover Image](https://example.com/cover3.jpg)")
-		
+
 		// Verify descriptions in italic
 		assert.Contains(t, mdContent, "*A great first post*")
 		assert.Contains(t, mdContent, "*This is the description*")
-		
+
 		// Verify separators
 		assert.Contains(t, mdContent, "---")
 	})
@@ -1220,40 +1637,40 @@ func TestArchivePageGeneration(t *testing.T) {
 	t.Run("GenerateText", func(t *testing.T) {
 		archive, tempDir := setupTestArchive()
 		defer os.RemoveAll(tempDir)
-		
+
 		err := archive.GenerateText(tempDir)
 		require.NoError(t, err)
-		
+
 		// Check file was created
 		indexPath := filepath.Join(tempDir, "index.txt")
 		assert.FileExists(t, indexPath)
-		
+
 		// Read and verify content
 		content, err := os.ReadFile(indexPath)
 		require.NoError(t, err)
 		txtContent := string(content)
-		
+
 		// Verify text structure
 		assert.Contains(t, txtContent, "SUBSTACK ARCHIVE\n================")
-		
+
 		// Verify post entries (newest first)
 		assert.Contains(t, txtContent, "Title: Third Post")
-		assert.Contains(t, txtContent, "Title: Second Post") 
+		assert.Contains(t, txtContent, "Title: Second Post")
 		assert.Contains(t, txtContent, "Title: First Post")
-		
+
 		// Verify file paths
 		assert.Contains(t, txtContent, "File: post1.html")
 		assert.Contains(t, txtContent, "File: post2.html")
 		assert.Contains(t, txtContent, "File: post3.html")
-		
+
 		// Verify formatted dates
 		assert.Contains(t, txtContent, "Published: January 1, 2023")
 		assert.Contains(t, txtContent, "Downloaded: January 10, 2023 12:00")
-		
+
 		// Verify descriptions
 		assert.Contains(t, txtContent, "Description: A great first post")
 		assert.Contains(t, txtContent, "Description: This is the description")
-		
+
 		// Verify separators
 		assert.Contains(t, txtContent, strings.Repeat("-", 50))
 	})
@@ -1262,26 +1679,26 @@ func TestArchivePageGeneration(t *testing.T) {
 		tempDir, err := os.MkdirTemp("", "empty_archive_test")
 		require.NoError(t, err)
 		defer os.RemoveAll(tempDir)
-		
+
 		archive := NewArchive()
-		
+
 		// Test each format with empty archive
 		err = archive.GenerateHTML(tempDir)
 		require.NoError(t, err)
-		
+
 		err = archive.GenerateMarkdown(tempDir)
 		require.NoError(t, err)
-		
+
 		err = archive.GenerateText(tempDir)
 		require.NoError(t, err)
-		
+
 		// Verify files exist and contain basic headers
 		htmlContent, _ := os.ReadFile(filepath.Join(tempDir, "index.html"))
 		assert.Contains(t, string(htmlContent), "Substack Archive")
-		
+
 		mdContent, _ := os.ReadFile(filepath.Join(tempDir, "index.md"))
 		assert.Contains(t, string(mdContent), "# Substack Archive")
-		
+
 		txtContent, _ := os.ReadFile(filepath.Join(tempDir, "index.txt"))
 		assert.Contains(t, string(txtContent), "SUBSTACK ARCHIVE")
 	})
@@ -1290,16 +1707,16 @@ func TestArchivePageGeneration(t *testing.T) {
 		archive := NewArchive()
 		post := createSamplePost()
 		archive.AddEntry(post, "test.html", time.Now())
-		
+
 		// Try to write to non-existent directory with restricted permissions
 		invalidDir := "/non/existent/directory"
-		
+
 		err := archive.GenerateHTML(invalidDir)
 		assert.Error(t, err)
-		
+
 		err = archive.GenerateMarkdown(invalidDir)
 		assert.Error(t, err)
-		
+
 		err = archive.GenerateText(invalidDir)
 		assert.Error(t, err)
 	})

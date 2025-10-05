@@ -1,6 +1,6 @@
 # Substack Downloader
 
-Simple CLI tool to download one or all the posts from a Substack blog.
+Simple CLI tool to download one or all the posts from a Substack blog, and download Substack Notes for specific users.
 
 ## Installation
 
@@ -31,6 +31,7 @@ Available Commands:
   download    Download individual posts or the entire public archive
   help        Help about any command
   list        List the posts of a Substack
+  notes       Download Substack Notes for a specific user
   version     Print the version number of sbstck-dl
 
 Flags:
@@ -264,6 +265,84 @@ Global Flags:
   -v, --verbose         Enable verbose output
 ```
 
+### Downloading Substack Notes
+
+You can download all Substack Notes for a specific user using their user ID. Notes are stored as comments in the user's activity feed, and this command fetches all activity and filters for notes vs regular comments.
+
+```bash
+Usage:
+  sbstck-dl notes [flags]
+
+Flags:
+  -f, --format string          Output format (html, md, txt) (default "md")
+  -h, --help                   help for notes
+      --max-pages int          Maximum pages to fetch (default 10)
+      --notes-only             Try to filter for notes vs regular comments
+  -o, --output-dir string      Output directory (default "./notes")
+      --user-id string         User ID (required, e.g., 303863305 for @nweiss)
+      --username string        Username for organizing output (e.g., nweiss)
+
+Global Flags:
+      --after string    Download posts published after this date (format: YYYY-MM-DD)
+      --before string   Download posts published before this date (format: YYYY-MM-DD)
+      --cookie_name cookieName   Either substack.sid or connect.sid, based on your cookie (required for private newsletters)
+      --cookie_val string        The substack.sid/connect.sid cookie value (required for private newsletters)
+  -x, --proxy string    Specify the proxy url
+  -r, --rate int        Specify the rate of requests per second (default 2)
+  -v, --verbose         Enable verbose output
+```
+
+#### Finding User IDs
+
+To find a user's ID, you can:
+1. Visit the user's Substack profile page
+2. Check the page source or network requests for API calls containing the user ID
+3. The user ID is typically a numeric value (e.g., 309173054)
+
+#### Notes Features
+
+**Output Formats:**
+- `html`: Full HTML format with styling and metadata
+- `md`: Markdown format with headers and links (default)
+- `txt`: Plain text format for maximum compatibility
+
+**Filtering:**
+- Use `--notes-only` to filter for actual notes vs regular post comments
+- The tool uses the activity context type to distinguish between notes and comments
+
+**Organization:**
+- Notes are saved with timestamp-based filenames: `YYYYMMDD_HHMMSS_noteID.{format}`
+- Output is organized by username or user ID in subdirectories
+- Each note includes metadata like publication context, engagement stats, and original URLs
+
+#### Examples
+
+```bash
+# Download notes for a specific user by user ID
+sbstck-dl notes --user-id 303863305 --username nweiss
+
+# Download notes in HTML format with verbose output
+sbstck-dl notes --user-id 303863305 --format html --verbose
+
+# Filter for actual notes only and fetch more pages
+sbstck-dl notes --user-id 303863305 --notes-only --max-pages 20
+
+# Download to custom directory
+sbstck-dl notes --user-id 303863305 --output-dir ./my-notes --username nweiss
+
+# Download in plain text format
+sbstck-dl notes --user-id 303863305 --format txt --output-dir ./notes-txt
+```
+
+**Directory Structure for Notes:**
+```
+notes/
+└── nweiss/              # Username or user_ID folder
+    ├── 20240115_143000_12345.md
+    ├── 20240114_120000_12346.md
+    └── 20240113_094500_12347.md
+```
+
 ### Private Newsletters
 
 In order to download the full text of private newsletters you need to provide the cookie name and value of your session.
@@ -288,6 +367,7 @@ sbstck-dl download --url https://example.substack.com --cookie_name substack.sid
 - [x] Add support for downloading images
 - [x] Add support for downloading file attachments
 - [x] Add archive index page functionality
+- [x] Add support for downloading Substack Notes
 - [x] Add tests
 - [x] Add CI
 - [x] Add documentation
