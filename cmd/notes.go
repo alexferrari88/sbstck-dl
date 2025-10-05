@@ -18,13 +18,15 @@ var (
 	notesFormat    string
 	notesMaxPages  int
 	notesOnly      bool
-	notesCmd       = &cobra.Command{
+
+	notesCmd = &cobra.Command{
 		Use:   "notes",
 		Short: "Download Substack Notes for a specific user",
 		Long: `Download all Substack Notes for a specific user using their user ID.
 
 Notes are stored as comments in the user's activity feed. This command fetches
-all activity and filters for notes vs regular comments.
+activity pages, filters out regular comments when requested, and writes notes in
+HTML, Markdown, or plain text formats with timestamped filenames.
 
 Example usage:
   sbstck-dl notes --user-id 303863305 --username nweiss --output-dir ./notes
@@ -34,7 +36,15 @@ Example usage:
 				log.Fatal("user-id is required")
 			}
 
-			// Setup output directory
+			// normalise format
+			notesFormat = strings.ToLower(notesFormat)
+			switch notesFormat {
+			case "html", "md", "txt":
+			default:
+				log.Fatalf("unsupported format: %s", notesFormat)
+			}
+
+			// prepare output path
 			outputDir := notesOutputDir
 			if notesUsername != "" {
 				outputDir = filepath.Join(notesOutputDir, notesUsername)
@@ -42,23 +52,19 @@ Example usage:
 				outputDir = filepath.Join(notesOutputDir, fmt.Sprintf("user_%s", notesUserID))
 			}
 
-			// Create output directory
-			if err := os.MkdirAll(outputDir, 0755); err != nil {
-				log.Fatalf("Error creating output directory: %v", err)
+			if err := os.MkdirAll(outputDir, 0o755); err != nil {
+				log.Fatalf("error creating output directory: %v", err)
 			}
 
 			fmt.Printf("Downloading notes for user ID: %s\n", notesUserID)
 			fmt.Printf("Output directory: %s\n", outputDir)
-			fmt.Printf("Format: %s\n", notesFormat)
-			fmt.Println()
+			fmt.Printf("Format: %s\n\n", notesFormat)
 
-			// Create notes client
-			notesClient := lib.NewNotesClient(fetcher)
+			client := lib.NewNotesClient(fetcher)
 
-			// Fetch all notes/comments
-			items, err := notesClient.FetchAllUserActivity(notesUserID, notesMaxPages, verbose)
+			items, err := client.FetchAllUserActivity(ctx, notesUserID, notesMaxPages, verbose)
 			if err != nil {
-				log.Fatalf("Error fetching user activity: %v", err)
+				log.Fatalf("error fetching user activity: %v", err)
 			}
 
 			if len(items) == 0 {
@@ -66,51 +72,58 @@ Example usage:
 				return
 			}
 
-			fmt.Printf("Found %d total activity items\n", len(items))
+			if verbose {
+				fmt.Printf("Fetched %d activity items\n", len(items))
+			}
 
-			// Filter and process
 			var notes []*lib.Note
 			for _, item := range items {
-				if item.Type == "comment" && item.Comment.ID != 0 {
-					// Skip if trying to filter for notes only and this looks like a regular comment
-					if notesOnly {
-						if notesClient.IsLikelyRegularComment(item.Comment, item) {
-							continue
-						}
-					}
+				if item.Type != "comment" || item.Comment.ID == 0 {
+					continue
+				}
 
-					note := notesClient.ConvertCommentToNote(item.Comment, item)
-					if note != nil {
-						notes = append(notes, note)
-					}
+				if notesOnly && client.IsLikelyRegularComment(item.Comment, item) {
+					continue
+				}
+
+				if note := client.ConvertCommentToNote(item.Comment, item); note != nil {
+					notes = append(notes, note)
 				}
 			}
 
-			fmt.Printf("Processing %d potential notes...\n", len(notes))
-			fmt.Println()
+			if len(notes) == 0 {
+				fmt.Println("No notes found in user activity")
+				return
+			}
 
-			// Save all notes
+			if verbose {
+				fmt.Printf("Saving %d notes...\n", len(notes))
+			}
+
+			saved := 0
 			for i, note := range notes {
 				if verbose {
-					fmt.Printf("[%d/%d] Saving note: %s\n", i+1, len(notes), note.ID)
+					fmt.Printf("[%d/%d] %s\n", i+1, len(notes), note.ID)
 				}
-				if err := notesClient.SaveNote(note, outputDir, notesFormat); err != nil {
-					log.Printf("Error saving note %s: %v", note.ID, err)
+				if err := client.SaveNote(note, outputDir, notesFormat); err != nil {
+					log.Printf("error saving note %s: %v", note.ID, err)
+					continue
 				}
+				saved++
 			}
 
-			fmt.Printf("Successfully saved %d items to: %s\n", len(notes), outputDir)
+			fmt.Printf("Successfully saved %d note(s) to %s\n", saved, outputDir)
 		},
 	}
 )
 
 func init() {
 	notesCmd.Flags().StringVar(&notesUserID, "user-id", "", "User ID (required, e.g., 303863305 for @nweiss)")
-	notesCmd.Flags().StringVar(&notesUsername, "username", "", "Username for organizing output (e.g., nweiss)")
+	notesCmd.Flags().StringVar(&notesUsername, "username", "", "Username for organising output (e.g., nweiss)")
 	notesCmd.Flags().StringVar(&notesOutputDir, "output-dir", "./notes", "Output directory")
 	notesCmd.Flags().StringVar(&notesFormat, "format", "md", "Output format (html, md, txt)")
-	notesCmd.Flags().IntVar(&notesMaxPages, "max-pages", 10, "Maximum pages to fetch")
-	notesCmd.Flags().BoolVar(&notesOnly, "notes-only", false, "Try to filter for notes vs regular comments")
+	notesCmd.Flags().IntVar(&notesMaxPages, "max-pages", 10, "Maximum pages of activity to fetch")
+	notesCmd.Flags().BoolVar(&notesOnly, "notes-only", false, "Attempt to filter regular comments and keep only notes")
 
-	notesCmd.MarkFlagRequired("user-id")
+	_ = notesCmd.MarkFlagRequired("user-id")
 }

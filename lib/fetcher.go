@@ -42,7 +42,7 @@ const userAgent = "sbstck-dl/0.1"
 type Fetcher struct {
 	Client      *http.Client
 	RateLimiter *rate.Limiter
-	BackoffCfg  backoff.BackOff
+	backoffFn   func() backoff.BackOff
 	Cookie      *http.Cookie
 	MaxWorkers  int
 }
@@ -165,10 +165,26 @@ func NewFetcher(opts ...FetcherOption) *Fetcher {
 		Timeout:   options.Timeout,
 	}
 
+	backoffFactory := func() backoff.BackOff {
+		if exp, ok := options.BackOffConfig.(*backoff.ExponentialBackOff); ok {
+			copy := *exp
+			copy.Reset()
+			return &copy
+		}
+		if options.BackOffConfig != nil {
+			b := makeDefaultBackoff()
+			b.Reset()
+			return b
+		}
+		b := makeDefaultBackoff()
+		b.Reset()
+		return b
+	}
+
 	return &Fetcher{
 		Client:      client,
 		RateLimiter: rate.NewLimiter(rate.Limit(options.RatePerSecond), options.Burst),
-		BackoffCfg:  options.BackOffConfig,
+		backoffFn:   backoffFactory,
 		Cookie:      options.Cookie,
 		MaxWorkers:  options.MaxWorkers,
 	}
@@ -223,6 +239,7 @@ func (f *Fetcher) FetchURL(ctx context.Context, url string) (io.ReadCloser, erro
 	var body io.ReadCloser
 	var err error
 	var retryCounter int
+	backoffCfg := f.backoffFn()
 
 	operation := func() error {
 		if retryCounter >= defaultMaxRetryCount {
@@ -250,7 +267,7 @@ func (f *Fetcher) FetchURL(ctx context.Context, url string) (io.ReadCloser, erro
 	// Use backoff with notification for logging
 	err = backoff.RetryNotify(
 		operation,
-		f.BackoffCfg,
+		backoffCfg,
 		func(err error, d time.Duration) {
 			// This could be connected to a logger
 			_ = err // Avoid unused variable error

@@ -1,9 +1,10 @@
 package lib
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
+	"io"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -11,188 +12,179 @@ import (
 	"strings"
 	"time"
 
-	"github.com/JohannesKaufmann/html-to-markdown"
+	"github.com/k3a/html2text"
 )
 
-// NotesClient handles downloading Substack Notes via API
+const notesBaseURL = "https://substack.com"
+
+// NotesClient fetches and persists Substack notes for a user.
 type NotesClient struct {
 	fetcher *Fetcher
+	baseURL string
 }
 
-// NewNotesClient creates a new notes client
+// NewNotesClient builds a NotesClient backed by the provided fetcher.
 func NewNotesClient(fetcher *Fetcher) *NotesClient {
 	return &NotesClient{
 		fetcher: fetcher,
+		baseURL: notesBaseURL,
 	}
 }
 
-// Note represents a Substack Note
-type Note struct {
-	ID             string                 `json:"id"`
-	Body           string                 `json:"body"`
-	BodyJSON       interface{}            `json:"body_json,omitempty"`
-	Title          string                 `json:"title"`
-	Context        string                 `json:"context"`
-	CreatedAt      string                 `json:"created_at"`
-	AuthorName     string                 `json:"author_name"`
-	AuthorHandle   string                 `json:"author_handle"`
-	URL            string                 `json:"url"`
-	Type           string                 `json:"type"`
-	Publication    map[string]interface{} `json:"publication,omitempty"`
-	ReactionCount  int                    `json:"reaction_count"`
-	Restacks       int                    `json:"restacks"`
+// SetBaseURL overrides the Substack base URL (used in tests).
+func (nc *NotesClient) SetBaseURL(base string) {
+	if base != "" {
+		nc.baseURL = strings.TrimRight(base, "/")
+	}
 }
 
-// NotesResponse represents the API response structure
+// Note represents a Substack note extracted from the reader activity feed.
+type Note struct {
+	ID            string                 `json:"id"`
+	Body          string                 `json:"body"`
+	BodyJSON      interface{}            `json:"body_json,omitempty"`
+	Context       string                 `json:"context,omitempty"`
+	CreatedAt     string                 `json:"created_at"`
+	AuthorName    string                 `json:"author_name"`
+	AuthorHandle  string                 `json:"author_handle"`
+	URL           string                 `json:"url"`
+	Type          string                 `json:"type"`
+	Publication   map[string]interface{} `json:"publication,omitempty"`
+	ReactionCount int                    `json:"reaction_count"`
+	Restacks      int                    `json:"restacks"`
+}
+
+// NotesResponse captures a paginated feed response.
 type NotesResponse struct {
 	Items      []ActivityItem `json:"items"`
 	NextCursor string         `json:"nextCursor"`
 }
 
-// ActivityItem represents an activity item from the user's feed
+// ActivityItem represents an entry in the reader feed.
 type ActivityItem struct {
-	Type    string                 `json:"type"`
-	Comment Comment                `json:"comment,omitempty"`
-	Post    map[string]interface{} `json:"post,omitempty"`
-	Context Context                `json:"context,omitempty"`
+	Type        string                 `json:"type"`
+	Comment     Comment                `json:"comment,omitempty"`
+	Post        map[string]interface{} `json:"post,omitempty"`
+	Context     Context                `json:"context,omitempty"`
 	Publication map[string]interface{} `json:"publication,omitempty"`
 }
 
-// Comment represents a comment/note in the activity feed
+// Comment is the raw comment structure returned by the feed.
 type Comment struct {
-	ID            int                    `json:"id"`
-	Body          string                 `json:"body"`
-	BodyJSON      interface{}            `json:"body_json,omitempty"`
-	Date          string                 `json:"date"`
-	Name          string                 `json:"name"`
-	Handle        string                 `json:"handle"`
-	UserID        int                    `json:"user_id"`
-	ReactionCount int                    `json:"reaction_count"`
-	Restacks      int                    `json:"restacks"`
+	ID            int         `json:"id"`
+	Body          string      `json:"body"`
+	BodyJSON      interface{} `json:"body_json,omitempty"`
+	Date          string      `json:"date"`
+	Name          string      `json:"name"`
+	Handle        string      `json:"handle"`
+	UserID        int         `json:"user_id"`
+	ReactionCount int         `json:"reaction_count"`
+	Restacks      int         `json:"restacks"`
 }
 
-// Context represents the context of an activity item
+// Context includes metadata describing the activity item.
 type Context struct {
 	Type string `json:"type"`
 }
 
-// NotesOptions contains options for downloading notes
-type NotesOptions struct {
-	UserID     string
-	Username   string
-	OutputDir  string
-	Format     string
-	MaxPages   int
-	NotesOnly  bool
-	Verbose    bool
-}
-
-// FetchAllUserActivity fetches all activity items for a user across multiple pages
-func (nc *NotesClient) FetchAllUserActivity(userID string, maxPages int, verbose bool) ([]ActivityItem, error) {
-	baseURL := fmt.Sprintf("https://substack.com/api/v1/reader/feed/profile/%s", userID)
-	headers := map[string]string{
-		"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
-		"Accept":     "application/json",
+// FetchAllUserActivity loads paginated activity for a given user ID.
+func (nc *NotesClient) FetchAllUserActivity(ctx context.Context, userID string, maxPages int, verbose bool) ([]ActivityItem, error) {
+	if maxPages <= 0 {
+		maxPages = 1
 	}
+
+	base := fmt.Sprintf("%s/api/v1/reader/feed/profile/%s", nc.baseURL, userID)
 
 	var allItems []ActivityItem
 	cursor := ""
-	page := 1
 
-	for page <= maxPages {
-		reqURL := baseURL
+	for page := 1; page <= maxPages; page++ {
+		requestURL := base
 		if cursor != "" {
-			reqURL += "?cursor=" + url.QueryEscape(cursor)
+			requestURL = fmt.Sprintf("%s?cursor=%s", base, url.QueryEscape(cursor))
 		}
 
 		if verbose {
-			fmt.Printf("Fetching page %d: %s\n", page, reqURL)
+			fmt.Printf("Fetching notes page %d: %s\n", page, requestURL)
 		}
 
-		req, err := http.NewRequest("GET", reqURL, nil)
+		body, err := nc.fetcher.FetchURL(ctx, requestURL)
 		if err != nil {
-			return nil, fmt.Errorf("creating request: %w", err)
+			return nil, fmt.Errorf("fetching notes page %d: %w", page, err)
 		}
 
-		for key, value := range headers {
-			req.Header.Set(key, value)
-		}
-
-		resp, err := nc.fetcher.client.Do(req)
+		data, err := io.ReadAll(body)
+		body.Close()
 		if err != nil {
-			return nil, fmt.Errorf("fetching page %d: %w", page, err)
-		}
-		defer resp.Body.Close()
-
-		if resp.StatusCode != http.StatusOK {
-			return nil, fmt.Errorf("API request failed with status %d", resp.StatusCode)
+			return nil, fmt.Errorf("reading notes page %d: %w", page, err)
 		}
 
-		var notesResp NotesResponse
-		if err := json.NewDecoder(resp.Body).Decode(&notesResp); err != nil {
-			return nil, fmt.Errorf("decoding response: %w", err)
+		var resp NotesResponse
+		if err := json.Unmarshal(data, &resp); err != nil {
+			return nil, fmt.Errorf("decoding notes page %d: %w", page, err)
 		}
 
-		if len(notesResp.Items) == 0 {
+		if len(resp.Items) == 0 {
 			if verbose {
-				fmt.Printf("  No items found on page %d\n", page)
+				fmt.Printf("  no items on page %d\n", page)
 			}
 			break
 		}
 
-		allItems = append(allItems, notesResp.Items...)
+		allItems = append(allItems, resp.Items...)
 		if verbose {
-			fmt.Printf("  Found %d items on page %d (total: %d)\n", len(notesResp.Items), page, len(allItems))
+			fmt.Printf("  gathered %d items (total %d)\n", len(resp.Items), len(allItems))
 		}
 
-		cursor = notesResp.NextCursor
+		cursor = resp.NextCursor
 		if cursor == "" {
 			if verbose {
-				fmt.Printf("  No more pages after page %d\n", page)
+				fmt.Printf("  cursor empty after page %d\n", page)
 			}
 			break
 		}
-
-		page++
 	}
 
 	return allItems, nil
 }
 
-// IsLikelyRegularComment detects if this is a regular comment vs a note using context.type
+// IsLikelyRegularComment heuristically identifies regular post comments.
 func (nc *NotesClient) IsLikelyRegularComment(comment Comment, item ActivityItem) bool {
-	// The definitive way: check context.type
-	if item.Context.Type == "note" {
-		return false // This is a note, not a regular comment
+	if strings.EqualFold(item.Context.Type, "note") {
+		return false
 	}
-	return true // This is a regular comment
+	return true
 }
 
-// ConvertCommentToNote converts a comment object to our note format
+// ConvertCommentToNote maps a feed comment to a Note structure.
 func (nc *NotesClient) ConvertCommentToNote(comment Comment, item ActivityItem) *Note {
-	body := comment.Body
-	if body == "" || len(strings.TrimSpace(body)) < 10 {
+	body := strings.TrimSpace(comment.Body)
+	if body == "" {
 		return nil
 	}
 
-	// Extract post context if available
-	postContext := ""
+	var contextText string
 	if item.Post != nil {
 		if title, ok := item.Post["title"].(string); ok && title != "" {
-			postContext = fmt.Sprintf("Context: %s", title)
+			contextText = title
 		}
+	}
+
+	handle := strings.TrimSpace(comment.Handle)
+	noteURL := fmt.Sprintf("%s/note/c-%d", notesBaseURL, comment.ID)
+	if handle != "" {
+		noteURL = fmt.Sprintf("%s/@%s/note/c-%d", notesBaseURL, handle, comment.ID)
 	}
 
 	return &Note{
 		ID:            fmt.Sprintf("%d", comment.ID),
-		Body:          body,
+		Body:          comment.Body,
 		BodyJSON:      comment.BodyJSON,
-		Title:         "", // Comments don't have titles
-		Context:       postContext,
+		Context:       contextText,
 		CreatedAt:     comment.Date,
 		AuthorName:    comment.Name,
-		AuthorHandle:  comment.Handle,
-		URL:           fmt.Sprintf("https://substack.com/profile/%d/comment/%d", comment.UserID, comment.ID),
+		AuthorHandle:  handle,
+		URL:           noteURL,
 		Type:          "comment_note",
 		Publication:   item.Publication,
 		ReactionCount: comment.ReactionCount,
@@ -200,73 +192,43 @@ func (nc *NotesClient) ConvertCommentToNote(comment Comment, item ActivityItem) 
 	}
 }
 
-// SaveNote saves a note to file in the specified format
+// SaveNote persists a note using the requested format.
 func (nc *NotesClient) SaveNote(note *Note, outputDir, format string) error {
-	// Create filename
-	var createdAt time.Time
-	if note.CreatedAt != "" {
-		// Parse the date string
-		dateStr := strings.ReplaceAll(strings.ReplaceAll(note.CreatedAt, "T", " "), "Z", "")
-		if parsed, err := time.Parse("2006-01-02 15:04:05", dateStr); err == nil {
-			createdAt = parsed
-		} else {
-			createdAt = time.Now()
-		}
-	} else {
-		createdAt = time.Now()
-	}
-
-	timestamp := createdAt.Format("20060102_150405")
-	
-	// Clean ID for filename
-	re := regexp.MustCompile(`[^\w\-_]`)
-	cleanID := re.ReplaceAllString(note.ID, "")
-	if len(cleanID) > 20 {
-		cleanID = cleanID[:20]
-	}
-	
-	filename := fmt.Sprintf("%s_%s.%s", timestamp, cleanID, format)
-	filepath := filepath.Join(outputDir, filename)
+	timestamp := sanitiseTimestamp(note.CreatedAt)
+	filename := fmt.Sprintf("%s_%s.%s", timestamp, sanitiseID(note.ID), format)
+	path := filepath.Join(outputDir, filename)
 
 	var content string
 	switch format {
 	case "html":
 		content = nc.formatNoteHTML(note)
 	case "md":
-		h := html2text.NewConverter()
-		h.Opt.PrettyTables = true
-		mdContent := h.Convert(note.Body)
-		content = nc.formatNoteMarkdown(note, mdContent)
+		markdown, err := mdConverter.ConvertString(note.Body)
+		if err != nil {
+			return fmt.Errorf("converting note %s to markdown: %w", note.ID, err)
+		}
+		content = nc.formatNoteMarkdown(note, markdown)
 	case "txt":
-		h := html2text.NewConverter()
-		h.Opt.PrettyTables = true
-		h.Opt.LinkStyle = "none"
-		textContent := h.Convert(note.Body)
-		content = nc.formatNoteText(note, textContent)
+		text := html2text.HTML2Text(note.Body)
+		content = nc.formatNoteText(note, text)
 	default:
 		return fmt.Errorf("unsupported format: %s", format)
 	}
 
-	return os.WriteFile(filepath, []byte(content), 0644)
+	return os.WriteFile(path, []byte(content), 0o644)
 }
 
-// formatNoteHTML formats a note as HTML
 func (nc *NotesClient) formatNoteHTML(note *Note) string {
 	contextHTML := ""
 	if note.Context != "" {
-		contextHTML = fmt.Sprintf("<div class='context'><strong>Context:</strong> %s</div>", note.Context)
+		contextHTML = fmt.Sprintf("<div class=\"context\"><strong>Context:</strong> %s</div>", note.Context)
 	}
-	
-	pubName := ""
+
+	publicationHTML := ""
 	if note.Publication != nil {
-		if name, ok := note.Publication["name"].(string); ok {
-			pubName = name
+		if name, ok := note.Publication["name"].(string); ok && name != "" {
+			publicationHTML = fmt.Sprintf("<div class=\"publication\"><strong>Publication:</strong> %s</div>", name)
 		}
-	}
-	
-	pubHTML := ""
-	if pubName != "" {
-		pubHTML = fmt.Sprintf("<div class='publication'><strong>Publication:</strong> %s</div>", pubName)
 	}
 
 	return fmt.Sprintf(`<!DOCTYPE html>
@@ -283,65 +245,87 @@ func (nc *NotesClient) formatNoteHTML(note *Note) string {
         %s
         <div class="content">%s</div>
         <div class="stats">Reactions: %d | Restacks: %d</div>
-        <div class="url"><a href="%s">Original Comment</a></div>
+        <div class="url"><a href="%s">Original Note</a></div>
     </div>
 </body>
-</html>`, note.AuthorName, note.AuthorName, note.AuthorHandle, note.CreatedAt, contextHTML, pubHTML, note.Body, note.ReactionCount, note.Restacks, note.URL)
+</html>`, note.AuthorName, note.AuthorName, note.AuthorHandle, note.CreatedAt, contextHTML, publicationHTML, note.Body, note.ReactionCount, note.Restacks, note.URL)
 }
 
-// formatNoteMarkdown formats a note as Markdown
-func (nc *NotesClient) formatNoteMarkdown(note *Note, mdContent string) string {
-	contextMD := ""
-	if note.Context != "" {
-		contextMD = fmt.Sprintf("**Context:** %s\n", note.Context)
+func (nc *NotesClient) formatNoteMarkdown(note *Note, body string) string {
+	parts := []string{
+		fmt.Sprintf("# Note by %s (@%s)", note.AuthorName, note.AuthorHandle),
+		"",
+		fmt.Sprintf("**Date:** %s  ", note.CreatedAt),
 	}
-	
-	pubName := ""
+
+	if note.Context != "" {
+		parts = append(parts, fmt.Sprintf("**Context:** %s", note.Context))
+	}
+
 	if note.Publication != nil {
-		if name, ok := note.Publication["name"].(string); ok {
-			pubName = name
+		if name, ok := note.Publication["name"].(string); ok && name != "" {
+			parts = append(parts, fmt.Sprintf("**Publication:** %s", name))
 		}
 	}
-	
-	pubMD := ""
-	if pubName != "" {
-		pubMD = fmt.Sprintf("**Publication:** %s\n", pubName)
-	}
 
-	return fmt.Sprintf(`# Note by %s (@%s)
+	parts = append(parts,
+		fmt.Sprintf("**URL:** %s", note.URL),
+		fmt.Sprintf("**Stats:** %d reactions, %d restacks", note.ReactionCount, note.Restacks),
+		"",
+		body,
+	)
 
-**Date:** %s  
-%s%s**URL:** %s
-**Stats:** %d reactions, %d restacks
-
-%s
-`, note.AuthorName, note.AuthorHandle, note.CreatedAt, contextMD, pubMD, note.URL, note.ReactionCount, note.Restacks, mdContent)
+	return strings.Join(parts, "\n") + "\n"
 }
 
-// formatNoteText formats a note as plain text
-func (nc *NotesClient) formatNoteText(note *Note, textContent string) string {
-	contextTxt := ""
-	if note.Context != "" {
-		contextTxt = fmt.Sprintf("Context: %s\n", note.Context)
+func (nc *NotesClient) formatNoteText(note *Note, body string) string {
+	lines := []string{
+		fmt.Sprintf("Note by %s (@%s)", note.AuthorName, note.AuthorHandle),
+		fmt.Sprintf("Date: %s", note.CreatedAt),
 	}
-	
-	pubName := ""
+
+	if note.Context != "" {
+		lines = append(lines, fmt.Sprintf("Context: %s", note.Context))
+	}
+
 	if note.Publication != nil {
-		if name, ok := note.Publication["name"].(string); ok {
-			pubName = name
+		if name, ok := note.Publication["name"].(string); ok && name != "" {
+			lines = append(lines, fmt.Sprintf("Publication: %s", name))
 		}
 	}
-	
-	pubTxt := ""
-	if pubName != "" {
-		pubTxt = fmt.Sprintf("Publication: %s\n", pubName)
+
+	lines = append(lines,
+		fmt.Sprintf("URL: %s", note.URL),
+		fmt.Sprintf("Stats: %d reactions, %d restacks", note.ReactionCount, note.Restacks),
+		"",
+		body,
+		"",
+	)
+
+	return strings.Join(lines, "\n")
+}
+
+var (
+	idSanitiser = regexp.MustCompile(`[^A-Za-z0-9_-]`)
+	timeLayouts = []string{time.RFC3339Nano, time.RFC3339, "2006-01-02 15:04:05"}
+)
+
+func sanitiseID(id string) string {
+	cleaned := idSanitiser.ReplaceAllString(id, "")
+	if cleaned == "" {
+		return "note"
 	}
+	if len(cleaned) > 32 {
+		cleaned = cleaned[:32]
+	}
+	return cleaned
+}
 
-	return fmt.Sprintf(`Note by %s (@%s)
-Date: %s
-%s%sURL: %s
-Stats: %d reactions, %d restacks
-
-%s
-`, note.AuthorName, note.AuthorHandle, note.CreatedAt, contextTxt, pubTxt, note.URL, note.ReactionCount, note.Restacks, textContent)
+func sanitiseTimestamp(raw string) string {
+	for _, layout := range timeLayouts {
+		if ts, err := time.Parse(layout, raw); err == nil {
+			return ts.Format("20060102_150405")
+		}
+	}
+	return time.Now().Format("20060102_150405")
 }
