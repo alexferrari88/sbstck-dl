@@ -114,6 +114,7 @@ func init() {
 	rootCmd.AddCommand(downloadCmd)
 	rootCmd.AddCommand(listCmd)
 	rootCmd.AddCommand(versionCmd)
+	rootCmd.AddCommand(notesCmd)
 }
 
 func makeDateFilterFunc(beforeDate string, afterDate string) lib.DateFilterFunc {

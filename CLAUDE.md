@@ -3,17 +3,18 @@
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Project Overview
-This is a Go CLI tool for downloading posts from Substack blogs. It supports downloading individual posts or entire archives, with features for private newsletters (via cookies), rate limiting, format conversion (HTML/Markdown/Text), downloading of images and file attachments locally, and creating archive index pages that link all downloaded posts with their metadata.
+This is a Go CLI tool for downloading posts from Substack blogs and Substack Notes. It supports downloading individual posts or entire archives, with features for private newsletters (via cookies), rate limiting, format conversion (HTML/Markdown/Text), downloading of images and file attachments locally, creating archive index pages that link all downloaded posts with their metadata, and downloading Substack Notes for specific users.
 
 ## Architecture
 The project follows a standard Go CLI structure:
 - `main.go`: Entry point
-- `cmd/`: Contains Cobra CLI commands (`root.go`, `download.go`, `list.go`, `version.go`)
-- `lib/`: Core library with four main components:
+- `cmd/`: Contains Cobra CLI commands (`root.go`, `download.go`, `list.go`, `version.go`, `notes.go`)
+- `lib/`: Core library with five main components:
   - `fetcher.go`: HTTP client with rate limiting, retries, and cookie support
   - `extractor.go`: Post extraction and format conversion (HTML→Markdown/Text)
   - `images.go`: Image downloading and local path management
   - `files.go`: File attachment downloading and local path management
+  - `notes.go`: Substack Notes downloading and API client
 
 ## Build and Development Commands
 
@@ -70,6 +71,15 @@ go mod download
 - Handles filename sanitization and collision avoidance
 - Integrates with existing image download workflow
 
+### Notes Client (`lib/notes.go`)
+- Downloads Substack Notes via the user activity feed API
+- Fetches activity across multiple pages with pagination support
+- Filters comments to identify actual notes vs regular post comments
+- Converts API response to structured note format with metadata
+- Supports HTML, Markdown, and plain text output formats
+- Organizes notes by timestamp with sanitized filenames
+- Extracts post context, publication info, and engagement metrics
+
 ### Archive Page Generator (`lib/extractor.go`)
 - Creates index pages linking all downloaded posts with metadata
 - Supports HTML, Markdown, and Text formats matching the selected output format
@@ -83,6 +93,7 @@ go mod download
 Uses Cobra framework:
 - `download`: Main functionality for downloading posts
 - `list`: Lists available posts from a Substack
+- `notes`: Downloads Substack Notes for a specific user
 - `version`: Shows version information
 
 ## Dependencies
@@ -148,6 +159,24 @@ go run . download --url https://example.substack.com --download-images --downloa
 
 # Download archive with specific format and custom directories
 go run . download --url https://example.substack.com --create-archive --format html --images-dir assets --files-dir attachments --output ./downloads
+```
+
+### Downloading Substack Notes
+```bash
+# Download notes for a specific user by user ID
+go run . notes --user-id 303863305 --username nweiss --output-dir ./notes
+
+# Download notes in HTML format
+go run . notes --user-id 303863305 --format html --output-dir ./notes
+
+# Download notes with filtering to get only actual notes (vs regular comments)
+go run . notes --user-id 303863305 --notes-only --output-dir ./notes
+
+# Download more pages of notes activity
+go run . notes --user-id 303863305 --max-pages 20 --verbose --output-dir ./notes
+
+# Download notes in plain text format
+go run . notes --user-id 303863305 --format txt --output-dir ./notes
 ```
 
 ### Building for release

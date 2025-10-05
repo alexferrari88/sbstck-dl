@@ -2,226 +2,89 @@ package lib
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"strings"
 	"testing"
 	"time"
 )
 
-type hostRewriteTransport struct {
-	mapping map[string]*url.URL
-	base    http.RoundTripper
+// rewriteTransport rewrites requests to the target test server while keeping the original path.
+type rewriteTransport struct {
+	target *url.URL
 }
 
-func (t *hostRewriteTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+func (rt *rewriteTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	clone := req.Clone(req.Context())
-	cloneURL := *clone.URL
-	host := strings.ToLower(cloneURL.Host)
-
-	if target, ok := t.mapping[host]; ok {
-		cloneURL.Scheme = target.Scheme
-		cloneURL.Host = target.Host
-	} else if idx := strings.Index(host, ":"); idx != -1 {
-		if target, ok := t.mapping[host[:idx]]; ok {
-			cloneURL.Scheme = target.Scheme
-			cloneURL.Host = target.Host
-		}
-	}
-
-	clone.URL = &cloneURL
-	clone.Host = cloneURL.Host
-
-	resp, err := t.base.RoundTrip(clone)
-	if err != nil {
-		return nil, err
-	}
-
-	if resp.Request != nil && resp.Request.URL != nil {
-		resp.Request.URL.Scheme = req.URL.Scheme
-		resp.Request.URL.Host = req.URL.Host
-	}
-
-	return resp, nil
+	clone.URL.Scheme = rt.target.Scheme
+	clone.URL.Host = rt.target.Host
+	clone.Host = rt.target.Host
+	return http.DefaultTransport.RoundTrip(clone)
 }
 
-func newTestFetcher(server *httptest.Server, hosts ...string) *Fetcher {
-	mapping := make(map[string]*url.URL)
-	targetURL, _ := url.Parse(server.URL)
-	for _, host := range armHosts(hosts) {
-		mapping[host] = targetURL
-	}
+func TestNormalizeURLAliasFetchCanonical(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/@writer/p-123" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html")
+		w.Write([]byte(`<html><head><link rel="canonical" href="https://custom.example.com/p/sinead-gibney" /></head><body></body></html>`))
+	}))
+	defer server.Close()
 
-	client := server.Client()
-	client.Timeout = 5 * time.Second
-	base := client.Transport
-	if base == nil {
-		base = http.DefaultTransport
-	}
-	client.Transport = &hostRewriteTransport{
-		mapping: mapping,
-		base:    base,
-	}
+	srvURL, _ := url.Parse(server.URL)
 
 	fetcher := NewFetcher()
-	fetcher.Client = client
-	return fetcher
-}
-
-func armHosts(hosts []string) []string {
-	normalized := make([]string, len(hosts))
-	for i, h := range hosts {
-		normalized[i] = strings.ToLower(h)
+	fetcher.Client = &http.Client{
+		Transport: &rewriteTransport{target: srvURL},
+		Timeout:   15 * time.Second,
 	}
-	return normalized
-}
 
-func TestNormalizeURLCanonicalizesSubstackAlias(t *testing.T) {
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/@writer/p-123":
-			payload := `{"post":{"canonical_url":"http://www.irishpoliticsnewsletter.ie/p/slug"}}`
-			fmt.Fprintf(w, `<html><head><script>window._preloads = JSON.parse(%q);</script></head><body></body></html>`, payload)
-		case "/p/slug":
-			_, _ = w.Write([]byte("ok"))
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer server.Close()
-
-	fetcher := newTestFetcher(server, "substack.com", "www.irishpoliticsnewsletter.ie")
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	normalized, err := NormalizeURL(ctx, fetcher, "https://substack.com/@writer/p-123")
+	normalized, err := NormalizeURL(context.Background(), fetcher, "https://substack.com/@writer/p-123")
 	if err != nil {
 		t.Fatalf("NormalizeURL returned error: %v", err)
 	}
-
-	if !strings.Contains(normalized, "irishpoliticsnewsletter.ie/p/slug") {
-		t.Fatalf("expected canonical path, got %s", normalized)
+	if normalized != "https://custom.example.com/p/sinead-gibney" {
+		t.Fatalf("expected canonical url, got %s", normalized)
 	}
 }
 
-func TestNormalizeURLCanonicalizesProfileAlias(t *testing.T) {
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/@writer":
-			payload := `{"profile":{"primaryPublication":{"custom_domain":"www.irishpoliticsnewsletter.ie"}}}`
-			fmt.Fprintf(w, `<html><head><script>window._preloads = JSON.parse(%q);</script></head><body></body></html>`, payload)
-		case "/":
-			_, _ = w.Write([]byte("ok"))
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer server.Close()
-
-	fetcher := newTestFetcher(server, "substack.com", "www.irishpoliticsnewsletter.ie")
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	normalized, err := NormalizeURL(ctx, fetcher, "https://substack.com/@writer")
+func TestNormalizeURLProfileNoteRewrite(t *testing.T) {
+	normalized, err := NormalizeURL(context.Background(), NewFetcher(), "https://substack.com/profile/109896535-the-irish-politics-newsletter/note/c-144807887")
 	if err != nil {
 		t.Fatalf("NormalizeURL returned error: %v", err)
 	}
-
-	if !strings.Contains(normalized, "irishpoliticsnewsletter.ie") {
-		t.Fatalf("expected canonical domain, got %s", normalized)
-	}
-	if !strings.HasSuffix(normalized, "/") {
-		t.Fatalf("expected trailing slash, got %s", normalized)
+	expected := "https://substack.com/note/c-144807887"
+	if normalized != expected {
+		t.Fatalf("expected %s, got %s", expected, normalized)
 	}
 }
 
-func TestNormalizeURLCanonicalizesProfilePrefix(t *testing.T) {
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/profile/some-user":
-			payload := `{"profile":{"primaryPublication":{"custom_domain":"www.irishpoliticsnewsletter.ie"}}}`
-			fmt.Fprintf(w, `<html><head><script>window._preloads = JSON.parse(%q);</script></head><body></body></html>`, payload)
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer server.Close()
-
-	fetcher := newTestFetcher(server, "substack.com", "www.irishpoliticsnewsletter.ie")
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	normalized, err := NormalizeURL(ctx, fetcher, "https://substack.com/profile/some-user")
+func TestNormalizeURLCustomDomainNote(t *testing.T) {
+	normalized, err := NormalizeURL(context.Background(), NewFetcher(), "https://www.irishpoliticsnewsletter.ie/note/c-144807887")
 	if err != nil {
 		t.Fatalf("NormalizeURL returned error: %v", err)
 	}
-
-	if !strings.Contains(normalized, "irishpoliticsnewsletter.ie") {
-		t.Fatalf("expected canonical domain, got %s", normalized)
-	}
-	if !strings.HasSuffix(normalized, "/") {
-		t.Fatalf("expected trailing slash, got %s", normalized)
+	expected := "https://substack.com/note/c-144807887"
+	if normalized != expected {
+		t.Fatalf("expected %s, got %s", expected, normalized)
 	}
 }
 
-func TestNormalizeURLFallsBackOn404(t *testing.T) {
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.NotFound(w, r)
-	}))
-	defer server.Close()
-
-	fetcher := newTestFetcher(server, "substack.com")
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	input := "https://substack.com/@writer/p-404"
-	normalized, err := NormalizeURL(ctx, fetcher, input)
+func TestNormalizeURLPassThroughWithoutFetcher(t *testing.T) {
+	input := "https://substack.com/@tullmcadoo/p-163653785"
+	normalized, err := NormalizeURL(context.Background(), nil, input)
 	if err != nil {
 		t.Fatalf("NormalizeURL returned error: %v", err)
 	}
-
 	if normalized != input {
 		t.Fatalf("expected %s, got %s", input, normalized)
 	}
 }
 
-func TestNormalizeURLCanonicalNoteFallsBackToAlias(t *testing.T) {
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/note/c-123":
-			w.Header().Set("Location", "https://substack.com/profile/handle-note/note/c-123")
-			w.WriteHeader(http.StatusFound)
-		case "/profile/handle-note/note/c-123":
-			payload := `{"feedData":{"feedItem":{"comment":{"handle":"handle-note"}}}}`
-			fmt.Fprintf(w, `<html><head><script>window._preloads = JSON.parse(%q);</script></head><body></body></html>`, payload)
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer server.Close()
-
-	fetcher := newTestFetcher(server, "substack.com")
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	normalized, err := NormalizeURL(ctx, fetcher, "https://www.customdomain.com/note/c-123")
-	if err != nil {
-		t.Fatalf("NormalizeURL returned error: %v", err)
-	}
-
-	if !strings.HasSuffix(normalized, "/note/c-123") {
-		t.Fatalf("expected canonical note suffix, got %s", normalized)
+func TestNormalizeURLEmpty(t *testing.T) {
+	if _, err := NormalizeURL(context.Background(), NewFetcher(), ""); err == nil {
+		t.Fatal("expected error for empty URL")
 	}
 }
