@@ -1470,11 +1470,17 @@ func formatRepliesHTML(replies []Comment) string {
 		sb.WriteString("</p>\n")
 
 		// Use HTML body if available, otherwise plain text
-		replyBody := reply.BodyHTML
-		if replyBody == "" {
-			replyBody = strings.ReplaceAll(reply.Body, "\n", "<br>")
+		replyBody := strings.TrimSpace(reply.BodyHTML)
+		if replyBody != "" {
+			sb.WriteString(replyBody)
+			sb.WriteString("\n")
+		} else {
+			fallback := commentBodyToHTML(reply.Body)
+			if fallback != "" {
+				sb.WriteString(fallback)
+				sb.WriteString("\n")
+			}
 		}
-		sb.WriteString(fmt.Sprintf("<p>%s</p>\n", replyBody))
 
 		// Add nested replies
 		if len(reply.Replies) > 0 {

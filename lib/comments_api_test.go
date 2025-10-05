@@ -138,3 +138,38 @@ func TestFormatRepliesText(t *testing.T) {
 		t.Fatalf("expected nested reply line, got %q", out)
 	}
 }
+
+func TestFormatRepliesHTML(t *testing.T) {
+	replies := []Comment{
+		{
+			User:     CommentUser{Name: "Author"},
+			BodyHTML: "<p>Existing HTML</p>",
+		},
+	}
+
+	out := formatRepliesHTML(replies)
+	if !strings.Contains(out, "<p><strong>Author replied:") {
+		t.Fatalf("expected reply heading, got %q", out)
+	}
+	if strings.Contains(out, "<p><p>") {
+		t.Fatalf("unexpected nested paragraph tags: %q", out)
+	}
+	if !strings.Contains(out, "<p>Existing HTML</p>") {
+		t.Fatalf("expected original html body, got %q", out)
+	}
+
+	replies = []Comment{
+		{
+			User: CommentUser{Name: "Author"},
+			Body: "Line 1\nLine 2\n<script>alert(1)</script>",
+		},
+	}
+
+	out = formatRepliesHTML(replies)
+	if !strings.Contains(out, "<p>Line 1<br>Line 2<br>&lt;script&gt;alert(1)&lt;/script&gt;</p>") {
+		t.Fatalf("expected converted newline formatting, got %q", out)
+	}
+	if strings.Contains(out, "<script>") {
+		t.Fatalf("expected html to be escaped, got %q", out)
+	}
+}

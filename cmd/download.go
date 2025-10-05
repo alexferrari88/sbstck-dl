@@ -36,14 +36,14 @@ var (
 		Run: func(cmd *cobra.Command, args []string) {
 			startTime := time.Now()
 
-			resolvedURL, err := fetcher.ResolveFinalURL(ctx, downloadUrl)
+			normalizedURL, err := lib.NormalizeURL(ctx, fetcher, downloadUrl)
 			if err != nil {
 				log.Fatalln(err)
 			}
-			if verbose && resolvedURL != downloadUrl {
-				fmt.Printf("Resolved final URL: %s\n", resolvedURL)
+			if verbose && normalizedURL != downloadUrl {
+				fmt.Printf("Resolved final URL: %s\n", normalizedURL)
 			}
-			downloadUrl = resolvedURL
+			downloadUrl = normalizedURL
 
 			// Create archive instance if flag is set
 			var archive *lib.Archive
