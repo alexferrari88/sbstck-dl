@@ -557,6 +557,8 @@ func runDownload(ctx context.Context, observer DownloadObserver, useProgressBar 
 			archiveErr = archive.GenerateHTML(outputFolder)
 		case "md":
 			archiveErr = archive.GenerateMarkdown(outputFolder)
+		case "obsidian-md":
+			archiveErr = archive.GenerateObsidianMarkdown(outputFolder)
 		case "txt":
 			archiveErr = archive.GenerateText(outputFolder)
 		default:

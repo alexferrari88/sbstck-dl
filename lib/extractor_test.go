@@ -136,7 +136,7 @@ func TestPostFormatConversions(t *testing.T) {
 
 	t.Run("contentForFormat", func(t *testing.T) {
 		// Test valid formats
-		for _, format := range []string{"html", "md", "txt"} {
+		for _, format := range []string{"html", "md", "obsidian-md", "txt"} {
 			content, err := post.contentForFormat(format, true)
 			assert.NoError(t, err)
 			assert.NotEmpty(t, content)
@@ -186,7 +186,7 @@ func TestPostWriteToFile(t *testing.T) {
 	require.NoError(t, err)
 	defer os.RemoveAll(tempDir)
 
-	formats := []string{"html", "md", "txt"}
+	formats := []string{"html", "md", "obsidian-md", "txt"}
 
 	for _, format := range formats {
 		t.Run(format, func(t *testing.T) {
@@ -209,6 +209,9 @@ func TestPostWriteToFile(t *testing.T) {
 				assert.Contains(t, string(content), "<h1>Test Post</h1>")
 				assert.Contains(t, string(content), "<p>This is a <strong>test</strong> post.</p>")
 			case "md":
+				assert.Contains(t, string(content), "# Test Post")
+				assert.Contains(t, string(content), "This is a **test** post.")
+			case "obsidian-md":
 				assert.Contains(t, string(content), "# Test Post")
 				assert.Contains(t, string(content), "This is a **test** post.")
 			case "txt":
@@ -240,7 +243,7 @@ func TestPostWriteToFile(t *testing.T) {
 
 	// Test with addSourceURL enabled
 	t.Run("with source URL", func(t *testing.T) {
-		formats := []string{"html", "md", "txt"}
+		formats := []string{"html", "md", "obsidian-md", "txt"}
 
 		for _, format := range formats {
 			t.Run(format, func(t *testing.T) {
@@ -284,6 +287,46 @@ func TestPostWriteToFile(t *testing.T) {
 
 		// Should not contain source URL line
 		assert.NotContains(t, contentStr, "original content")
+	})
+}
+
+func TestObsidianMarkdownTransforms(t *testing.T) {
+	t.Run("local links to wikilinks", func(t *testing.T) {
+		input := "See [OtherNote](OtherNote.md) and [Label](OtherNote.md)."
+		expected := "See [[OtherNote]] and [[OtherNote|Label]]."
+		assert.Equal(t, expected, transformObsidianMarkdown(input))
+	})
+
+	t.Run("anchored links", func(t *testing.T) {
+		input := "See [Label](OtherNote.md#section-title)."
+		expected := "See [[OtherNote#section-title|Label]]."
+		assert.Equal(t, expected, transformObsidianMarkdown(input))
+	})
+
+	t.Run("external links unchanged", func(t *testing.T) {
+		input := "See [External](https://example.com/OtherNote.md)."
+		expected := "See [External](https://example.com/OtherNote.md)."
+		assert.Equal(t, expected, transformObsidianMarkdown(input))
+	})
+
+	t.Run("local images to embeds", func(t *testing.T) {
+		input := "Image: ![alt](./assets/img.png) and ![ext](https://example.com/img.png)."
+		expected := "Image: ![[assets/img.png]] and ![ext](https://example.com/img.png)."
+		assert.Equal(t, expected, transformObsidianMarkdown(input))
+	})
+
+	t.Run("frontmatter preserved", func(t *testing.T) {
+		input := "---\r\ntitle: Test\r\nlink: OtherNote.md\r\n---\r\nSee [Note](OtherNote.md)\r\n"
+		expected := "---\ntitle: Test\nlink: OtherNote.md\n---\nSee [[OtherNote|Note]]\n"
+		output := transformObsidianMarkdown(input)
+		assert.Equal(t, expected, output)
+		assert.NotContains(t, output, "\r")
+	})
+
+	t.Run("code fences preserved", func(t *testing.T) {
+		input := "Before [Note](OtherNote.md)\n```\n[Note](OtherNote.md)\n```\nAfter [Note](OtherNote.md)"
+		expected := "Before [[OtherNote|Note]]\n```\n[Note](OtherNote.md)\n```\nAfter [[OtherNote|Note]]"
+		assert.Equal(t, expected, transformObsidianMarkdown(input))
 	})
 }
 

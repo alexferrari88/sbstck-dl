@@ -592,7 +592,7 @@ func TestArchiveWorkflow(t *testing.T) {
 		}
 
 		// Test with different output formats
-		formats := []string{"html", "md", "txt"}
+		formats := []string{"html", "md", "obsidian-md", "txt"}
 
 		for _, format := range formats {
 			t.Run(fmt.Sprintf("format_%s", format), func(t *testing.T) {
@@ -615,6 +615,8 @@ func TestArchiveWorkflow(t *testing.T) {
 					err = archive.GenerateHTML(formatDir)
 				case "md":
 					err = archive.GenerateMarkdown(formatDir)
+				case "obsidian-md":
+					err = archive.GenerateObsidianMarkdown(formatDir)
 				case "txt":
 					err = archive.GenerateText(formatDir)
 				}

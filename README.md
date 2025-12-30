@@ -83,7 +83,7 @@ Flags:
       --file-extensions string Comma-separated list of file extensions to download (e.g., 'pdf,docx,txt'). If empty, downloads all file types
       --files-dir string       Directory name for downloaded file attachments (default "files")
       --force                 Redownload posts even if they already exist
-  -f, --format string          Specify the output format (options: "html", "md", "txt" (default "html")
+  -f, --format string          Specify the output format (options: "html", "md", "obsidian-md", "txt" (default "html")
   -h, --help                   help for download
       --image-quality string   Image quality to download (options: "high", "medium", "low") (default "high")
       --images-dir string      Directory name for downloaded images (default "images")
@@ -111,6 +111,27 @@ Global Flags:
   -x, --proxy string    Specify the proxy url
   -r, --rate int        Specify the rate of requests per second (default 2)
   -v, --verbose         Enable verbose output
+```
+
+#### Output formats
+
+- `html`: Default; preserves Substack formatting best.
+- `md`: Standard Markdown.
+- `obsidian-md`: Markdown optimized for Obsidian (wikilinks/embeds, LF line endings).
+- `txt`: Plain text.
+
+Example (obsidian-md conversion):
+
+Before (md):
+```md
+[Label](OtherNote.md)
+![alt](./assets/img.png)
+```
+
+After (obsidian-md):
+```md
+[[OtherNote|Label]]
+![[assets/img.png]]
 ```
 
 #### Adding Source URL
@@ -217,7 +238,7 @@ output/
 Use the `--create-archive` flag to generate an organized index page that links all downloaded posts with their metadata. This creates a beautiful overview of your downloaded content, making it easy to browse and access your Substack archive.
 
 **Features:**
-- Creates `index.{format}` file matching your selected output format (HTML/Markdown/Text)
+- Creates `index.{format}` file matching your selected output format (HTML/Markdown/Obsidian Markdown/Text)
 - Links to all downloaded posts using relative file paths
 - Displays post titles, publication dates, and download timestamps
 - Shows post descriptions/subtitles and cover images when available
@@ -385,7 +406,7 @@ Usage:
   sbstck-dl archive [flags]
 
 Flags:
-  -f, --format string   Specify the output format (options: "html", "md", "txt" (default "html")
+  -f, --format string   Specify the output format (options: "html", "md", "obsidian-md", "txt" (default "html")
   -h, --help            help for archive
   -o, --output string   Specify the download directory (default ".")
 

@@ -21,8 +21,8 @@ var (
 		Long:  "Generate index.{format} from existing downloaded posts without re-downloading content.",
 		Run: func(cmd *cobra.Command, args []string) {
 			format := strings.ToLower(strings.TrimSpace(archiveFormat))
-			if format != "html" && format != "md" && format != "txt" {
-				log.Fatal("invalid format (use html, md, or txt)")
+			if format != "html" && format != "md" && format != "obsidian-md" && format != "txt" {
+				log.Fatal("invalid format (use html, md, obsidian-md, or txt)")
 			}
 
 			entries, err := buildArchiveEntries(archiveOutput, format)
@@ -51,6 +51,8 @@ var (
 				archiveErr = archive.GenerateHTML(archiveOutput)
 			case "md":
 				archiveErr = archive.GenerateMarkdown(archiveOutput)
+			case "obsidian-md":
+				archiveErr = archive.GenerateObsidianMarkdown(archiveOutput)
 			case "txt":
 				archiveErr = archive.GenerateText(archiveOutput)
 			}
@@ -73,7 +75,7 @@ var (
 
 func init() {
 	archiveCmd.Flags().StringVarP(&archiveOutput, "output", "o", ".", "Specify the download directory")
-	archiveCmd.Flags().StringVarP(&archiveFormat, "format", "f", "html", "Specify the output format (options: \"html\", \"md\", \"txt\"")
+	archiveCmd.Flags().StringVarP(&archiveFormat, "format", "f", "html", "Specify the output format (options: \"html\", \"md\", \"obsidian-md\", \"txt\"")
 }
 
 type archiveEntryData struct {

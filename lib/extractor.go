@@ -101,6 +101,8 @@ func (p *Post) contentForFormat(format string, withTitle bool) (string, error) {
 		return p.ToHTML(withTitle), nil
 	case "md":
 		return p.ToMD(withTitle)
+	case "obsidian-md":
+		return p.ToObsidianMD(withTitle)
 	case "txt":
 		return p.ToText(withTitle), nil
 	default:
@@ -108,7 +110,7 @@ func (p *Post) contentForFormat(format string, withTitle bool) (string, error) {
 	}
 }
 
-// WriteToFile writes the Post's content to a file in the specified format (html, md, or txt).
+// WriteToFile writes the Post's content to a file in the specified format (html, md, obsidian-md, or txt).
 func (p *Post) WriteToFile(path string, format string, addSourceURL bool) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return err
@@ -149,13 +151,13 @@ func (p *Post) WriteToFileWithImages(ctx context.Context, path string, format st
 	var imageResult *ImageDownloadResult
 
 	// Download images if requested and format supports it
-	if downloadImages && (format == "html" || format == "md") {
+	if downloadImages && (format == "html" || format == "md" || format == "obsidian-md") {
 		outputDir := filepath.Dir(path)
 		imageDownloader := NewImageDownloader(fetcher, outputDir, imagesDir, imageQuality)
 
 		// Only process HTML content for image downloading
 		htmlContent := content
-		if format == "md" {
+		if format == "md" || format == "obsidian-md" {
 			// For markdown, we need to work with the original HTML
 			htmlContent = p.BodyHTML
 		}
@@ -181,6 +183,12 @@ func (p *Post) WriteToFileWithImages(ctx context.Context, path string, format st
 				return nil, fmt.Errorf("failed to convert updated HTML to markdown: %w", err)
 			}
 			content = fmt.Sprintf("# %s\n\n%s", p.Title, updatedContent)
+		} else if format == "obsidian-md" {
+			updatedContent, err := convertHTMLToObsidianMarkdown(imageResult.UpdatedHTML, p.Title, true)
+			if err != nil {
+				return nil, fmt.Errorf("failed to convert updated HTML to Obsidian markdown: %w", err)
+			}
+			content = updatedContent
 		}
 	} else if downloadImages && format == "txt" {
 		// For text format, we can't embed images, but we can still download them
@@ -195,7 +203,7 @@ func (p *Post) WriteToFileWithImages(ctx context.Context, path string, format st
 	}
 
 	// Download files if requested and format supports it
-	if downloadFiles && (format == "html" || format == "md") {
+	if downloadFiles && (format == "html" || format == "md" || format == "obsidian-md") {
 		outputDir := filepath.Dir(path)
 		fileDownloader := NewFileDownloader(fetcher, outputDir, filesDir, fileExtensions)
 
@@ -203,7 +211,7 @@ func (p *Post) WriteToFileWithImages(ctx context.Context, path string, format st
 		htmlContent := content
 		if imageResult != nil && imageResult.UpdatedHTML != "" {
 			htmlContent = imageResult.UpdatedHTML
-		} else if format == "md" {
+		} else if format == "md" || format == "obsidian-md" {
 			// For markdown, we need to work with the original HTML
 			htmlContent = p.BodyHTML
 		}
@@ -228,6 +236,12 @@ func (p *Post) WriteToFileWithImages(ctx context.Context, path string, format st
 					return nil, fmt.Errorf("failed to convert updated HTML to markdown: %w", err)
 				}
 				content = fmt.Sprintf("# %s\n\n%s", p.Title, updatedContent)
+			} else if format == "obsidian-md" {
+				updatedContent, err := convertHTMLToObsidianMarkdown(fileResult.UpdatedHTML, p.Title, true)
+				if err != nil {
+					return nil, fmt.Errorf("failed to convert updated HTML to Obsidian markdown: %w", err)
+				}
+				content = updatedContent
 			}
 		}
 	}
@@ -1169,7 +1183,19 @@ func (a *Archive) GenerateHTML(outputDir string) error {
 // GenerateMarkdown creates a Markdown archive page
 func (a *Archive) GenerateMarkdown(outputDir string) error {
 	archivePath := filepath.Join(outputDir, "index.md")
+	content := a.buildMarkdownArchiveContent(outputDir)
+	return os.WriteFile(archivePath, []byte(content), 0644)
+}
 
+// GenerateObsidianMarkdown creates an Obsidian-optimized Markdown archive page.
+func (a *Archive) GenerateObsidianMarkdown(outputDir string) error {
+	archivePath := filepath.Join(outputDir, "index.obsidian-md")
+	content := a.buildMarkdownArchiveContent(outputDir)
+	content = transformObsidianMarkdown(content)
+	return os.WriteFile(archivePath, []byte(content), 0644)
+}
+
+func (a *Archive) buildMarkdownArchiveContent(outputDir string) string {
 	content := "# Substack Archive\n\n"
 
 	for _, entry := range a.Entries {
@@ -1205,7 +1231,7 @@ func (a *Archive) GenerateMarkdown(outputDir string) error {
 		content += "---\n\n"
 	}
 
-	return os.WriteFile(archivePath, []byte(content), 0644)
+	return content
 }
 
 // GenerateText creates a plain text archive page
