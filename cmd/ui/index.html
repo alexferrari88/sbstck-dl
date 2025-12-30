@@ -472,6 +472,56 @@
     .preset-title { font-size: 16px; font-weight: 600; color: var(--ink); }
     .preset-desc { font-size: 13px; color: var(--muted); }
     .preset-meta { font-size: 12px; color: #64748b; }
+    .quick-grid {
+      display: grid;
+      gap: 14px;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      margin-top: 12px;
+    }
+    .summary-card {
+      border: 1px solid rgba(15, 23, 42, 0.12);
+      border-radius: 16px;
+      padding: 16px;
+      background: rgba(255, 255, 255, 0.9);
+      display: grid;
+      gap: 10px;
+      box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
+    }
+    .summary-title {
+      font-size: 12px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: #7c2d12;
+    }
+    .summary-grid {
+      display: grid;
+      gap: 8px;
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    }
+    .summary-item {
+      display: grid;
+      gap: 4px;
+      padding: 8px 10px;
+      border-radius: 12px;
+      background: rgba(244, 162, 97, 0.12);
+      border: 1px solid rgba(244, 162, 97, 0.25);
+      color: #7c2d12;
+    }
+    .summary-item span {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #9a3412;
+    }
+    .summary-item strong {
+      font-size: 14px;
+      color: #7c2d12;
+    }
+    .quick-actions {
+      display: grid;
+      gap: 8px;
+      align-content: start;
+    }
     .advanced-only.is-hidden { display: none; }
     .toggle-row {
       display: flex;
@@ -603,38 +653,53 @@
 
     <div class="card">
       <div class="stepper">
-        <button class="step-pill active" data-step-pill="1" type="button"><span>Step 1</span>Preset</button>
+        <button class="step-pill active" data-step-pill="1" type="button"><span>Step 1</span>Start</button>
         <button class="step-pill" data-step-pill="2" type="button"><span>Step 2</span>Configure</button>
         <button class="step-pill" data-step-pill="3" type="button"><span>Step 3</span>Review</button>
       </div>
 
       <form id="wizardForm">
         <section class="step-panel active" data-step="1">
-          <h2>Choose a preset</h2>
-          <p class="small">Basic keeps only the essentials. Advanced exposes every download flag.</p>
-          <div class="preset-grid">
-            <label class="preset-card">
-              <div>
-                <input type="radio" name="preset" value="basic" checked />
-                <span class="preset-title">Basic</span>
+          <h2>Quick start</h2>
+          <p class="small">Use recommended defaults, then fill the essentials. You can fine-tune everything in Step 2.</p>
+          <div class="quick-grid">
+            <div class="summary-card">
+              <div class="summary-title">Recommended defaults</div>
+              <div class="summary-grid">
+                <div class="summary-item"><span>Format</span><strong>html</strong></div>
+                <div class="summary-item"><span>Archive</span><strong>on</strong></div>
+                <div class="summary-item"><span>Images</span><strong>on</strong></div>
+                <div class="summary-item"><span>Files</span><strong>off</strong></div>
+                <div class="summary-item"><span>Rate</span><strong>2 / sec</strong></div>
+                <div class="summary-item"><span>Workers</span><strong>10</strong></div>
+                <div class="summary-item"><span>Layout</span><strong>flat</strong></div>
               </div>
-              <span class="preset-desc">Quick download with archive and assets.</span>
-              <span class="preset-meta">URL, output, format, archive, assets, rate, workers.</span>
-            </label>
-            <label class="preset-card">
-              <div>
-                <input type="radio" name="preset" value="advanced" />
-                <span class="preset-title">Advanced</span>
-              </div>
-              <span class="preset-desc">Full control over filters, retries, and auth.</span>
-              <span class="preset-meta">Includes cookies, layout, metadata, and safety flags.</span>
-            </label>
+            </div>
+            <div class="summary-card">
+              <p class="small">Apply defaults in one click. Great for most archives.</p>
+              <button class="primary" data-defaults-btn type="button">Use recommended defaults</button>
+              <span class="help">You can edit any value in the next step.</span>
+            </div>
           </div>
         </section>
 
         <section class="step-panel" data-step="2">
           <h2>Configure the download</h2>
-          <p class="small">Recommended defaults: format html, rate 2, max-workers 10. Enable images/files for offline archives.</p>
+          <p class="small">Start with the essentials. Turn on advanced options only if you need them.</p>
+
+          <div class="group">
+            <h3>Quick actions</h3>
+            <div class="grid">
+              <div class="quick-actions">
+                <button class="primary" data-defaults-btn type="button">Use recommended defaults</button>
+                <span class="help">Applies the defaults shown on Step 1.</span>
+              </div>
+              <label class="toggle-row">
+                <input id="showAdvanced" type="checkbox" />
+                Show advanced options
+              </label>
+            </div>
+          </div>
 
           <div class="group">
             <h3>Core</h3>
@@ -870,7 +935,7 @@
             <ul id="validationErrors" class="error-list" hidden></ul>
             <div class="group">
               <h3>Profiles and config</h3>
-              <p class="small">Save presets locally and export/import JSON config files. Cookies are only stored if you opt in.</p>
+              <p class="small">Save settings locally and export/import JSON config files. Cookies are only stored if you opt in.</p>
               <div class="grid">
                 <label class="field">
                   Profile name
@@ -981,6 +1046,7 @@
       const csrfTokenMeta = document.querySelector('meta[name="csrf-token"]');
       const csrfToken = csrfTokenMeta ? csrfTokenMeta.getAttribute('content') : '';
       const presetInputs = Array.from(document.querySelectorAll('input[name="preset"]'));
+      const defaultsButtons = Array.from(document.querySelectorAll('[data-defaults-btn]'));
       const advancedGroups = Array.from(document.querySelectorAll('[data-advanced="true"]'));
       const errorTargets = {};
       document.querySelectorAll('[data-error-for]').forEach(el => {
@@ -990,6 +1056,7 @@
       const outputInput = document.getElementById('output');
       const outputBrowseBtn = document.getElementById('outputBrowseBtn');
       const outputDirPicker = document.getElementById('outputDirPicker');
+      const showAdvancedToggle = document.getElementById('showAdvanced');
       const privateUrlInput = document.getElementById('privateUrl');
       const proxyInput = document.getElementById('proxy');
       const afterDateInput = document.getElementById('afterDate');
@@ -1170,6 +1237,29 @@
         outputInput.dispatchEvent(new Event('input', { bubbles: true }));
       }
 
+      function applyRecommendedDefaults() {
+        const setValue = (id, value) => {
+          const el = document.getElementById(id);
+          if (!el) return;
+          el.value = String(value);
+        };
+        const setChecked = (id, value) => {
+          const el = document.getElementById(id);
+          if (!el) return;
+          el.checked = Boolean(value);
+        };
+
+        setValue('format', 'html');
+        setChecked('createArchive', true);
+        setChecked('downloadImages', true);
+        setChecked('downloadFiles', false);
+        setValue('rate', '2');
+        setValue('maxWorkers', '10');
+        setValue('layout', 'flat');
+
+        buildCommand();
+      }
+
       function buildCommand() {
         const parts = ['sbstck-dl', 'download'];
         const elements = Array.from(form.querySelectorAll('[data-flag]'));
@@ -1224,6 +1314,24 @@
         buildCommand();
       });
 
+      if (defaultsButtons.length) {
+        defaultsButtons.forEach(btn => {
+          btn.addEventListener('click', function () {
+            applyRecommendedDefaults();
+            if (currentStep === 1) {
+              showStep(2);
+            }
+          });
+        });
+      }
+
+      if (showAdvancedToggle) {
+        showAdvancedToggle.addEventListener('change', function () {
+          setPreset(showAdvancedToggle.checked ? 'advanced' : 'basic');
+          buildCommand();
+        });
+      }
+
       if (outputBrowseBtn) {
         outputBrowseBtn.addEventListener('click', async function () {
           if (outputDirPicker && outputDirPicker.disabled) return;
@@ -1266,8 +1374,7 @@
       presetInputs.forEach(input => {
         input.addEventListener('change', function () {
           if (input.checked) {
-            activePreset = input.value;
-            toggleAdvanced(activePreset === 'advanced');
+            setPreset(input.value);
             buildCommand();
           }
         });
@@ -1724,11 +1831,14 @@
       }
 
       function setPreset(value) {
-        activePreset = value;
+        activePreset = value === 'advanced' ? 'advanced' : 'basic';
         presetInputs.forEach(input => {
-          input.checked = input.value === value;
+          input.checked = input.value === activePreset;
         });
-        toggleAdvanced(value === 'advanced');
+        if (showAdvancedToggle) {
+          showAdvancedToggle.checked = activePreset === 'advanced';
+        }
+        toggleAdvanced(activePreset === 'advanced');
       }
 
       function applyConfigToForm(config, preset) {
@@ -2078,7 +2188,7 @@
         });
       }
 
-      toggleAdvanced(false);
+      setPreset('basic');
       setJobButtons(false);
       renderProfiles();
       buildCommand();
