@@ -290,6 +290,23 @@
       color: var(--ink);
       background: #ffffff;
     }
+    .input-row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+    .input-row input[type="text"] {
+      flex: 1;
+      min-width: 0;
+    }
+    .input-row button {
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: #ffffff;
+      font-size: 13px;
+      cursor: pointer;
+    }
     label.field input[type="checkbox"] {
       width: auto;
       margin-right: 8px;
@@ -466,9 +483,13 @@
               </label>
               <label class="field">
                 Output directory <span class="flag">--output</span><span class="tip" title="Where downloaded files will be saved.">?</span>
-                <input id="output" data-flag="--output" type="text" placeholder="." />
+                <div class="input-row">
+                  <input id="output" data-flag="--output" type="text" placeholder="." />
+                  <button id="outputBrowseBtn" type="button">Browse</button>
+                </div>
                 <span class="help">Use "." for the current folder.</span>
               </label>
+              <input id="outputDirPicker" type="file" webkitdirectory hidden />
               <label class="field">
                 Format <span class="flag">--format</span><span class="tip" title="HTML is recommended for full fidelity.">?</span>
                 <select id="format" data-flag="--format" data-default="html">
@@ -802,6 +823,9 @@
         errorTargets[el.dataset.errorFor] = el;
       });
       const urlInput = document.getElementById('url');
+      const outputInput = document.getElementById('output');
+      const outputBrowseBtn = document.getElementById('outputBrowseBtn');
+      const outputDirPicker = document.getElementById('outputDirPicker');
       const privateUrlInput = document.getElementById('privateUrl');
       const proxyInput = document.getElementById('proxy');
       const afterDateInput = document.getElementById('afterDate');
@@ -976,6 +1000,12 @@
         return errors;
       }
 
+      function setOutputPath(value) {
+        if (!outputInput || !value) return;
+        outputInput.value = value;
+        outputInput.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+
       function buildCommand() {
         const parts = ['sbstck-dl', 'download'];
         const elements = Array.from(form.querySelectorAll('[data-flag]'));
@@ -1029,6 +1059,39 @@
         }
         buildCommand();
       });
+
+      if (outputBrowseBtn) {
+        outputBrowseBtn.addEventListener('click', async function () {
+          if (outputDirPicker && outputDirPicker.disabled) return;
+          if (window.showDirectoryPicker) {
+            try {
+              const handle = await window.showDirectoryPicker();
+              if (handle && handle.name) {
+                setOutputPath(handle.name);
+              }
+              return;
+            } catch (err) {
+              if (err && err.name === 'AbortError') return;
+            }
+          }
+          if (outputDirPicker) {
+            outputDirPicker.click();
+          }
+        });
+      }
+
+      if (outputDirPicker) {
+        outputDirPicker.addEventListener('change', function () {
+          const files = outputDirPicker.files;
+          if (!files || files.length === 0) return;
+          const relPath = files[0].webkitRelativePath || files[0].name || '';
+          const root = relPath.split(/[\\/]/)[0];
+          if (root) {
+            setOutputPath(root);
+          }
+          outputDirPicker.value = '';
+        });
+      }
 
       stepPills.forEach(pill => {
         pill.addEventListener('click', function () {
