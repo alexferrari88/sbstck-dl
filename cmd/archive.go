@@ -61,7 +61,7 @@ var (
 				log.Fatalf("Error generating archive page: %v\n", archiveErr)
 			}
 			if verbose {
-				fmt.Printf("Archive page generated: %s/index.%s\n", archiveOutput, format)
+				fmt.Printf("Archive page generated: %s/index.%s\n", archiveOutput, outputFormatExtension(format))
 			}
 
 			if err := generateNotionIndex(archiveOutput, format); err != nil {
@@ -170,7 +170,7 @@ func scanDownloadedFiles(outputFolder string, format string) ([]string, error) {
 	}
 
 	paths := make([]string, 0)
-	ext := "." + format
+	ext := "." + outputFormatExtension(format)
 	err := filepath.WalkDir(outputFolder, func(path string, entry os.DirEntry, err error) error {
 		if err != nil {
 			return err

@@ -1189,7 +1189,7 @@ func (a *Archive) GenerateMarkdown(outputDir string) error {
 
 // GenerateObsidianMarkdown creates an Obsidian-optimized Markdown archive page.
 func (a *Archive) GenerateObsidianMarkdown(outputDir string) error {
-	archivePath := filepath.Join(outputDir, "index.obsidian-md")
+	archivePath := filepath.Join(outputDir, "index.obsidian.md")
 	content := a.buildMarkdownArchiveContent(outputDir)
 	content = transformObsidianMarkdown(content)
 	return os.WriteFile(archivePath, []byte(content), 0644)

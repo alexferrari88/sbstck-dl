@@ -213,6 +213,14 @@ func TestMakePath(t *testing.T) {
 			expected:     filepath.Join("/tmp/downloads", "20230101_103000_test-post.txt"),
 		},
 		{
+			name:         "obsidian markdown format",
+			post:         post,
+			outputFolder: "/tmp/downloads",
+			format:       "obsidian-md",
+			layout:       "flat",
+			expected:     filepath.Join("/tmp/downloads", "20230101_103000_test-post.obsidian.md"),
+		},
+		{
 			name:         "no output folder",
 			post:         post,
 			outputFolder: "",

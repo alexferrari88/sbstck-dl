@@ -603,7 +603,7 @@ func TestArchiveWorkflow(t *testing.T) {
 				archive := lib.NewArchive()
 
 				// Write post in the specified format
-				filePath := filepath.Join(formatDir, fmt.Sprintf("post.%s", format))
+				filePath := filepath.Join(formatDir, fmt.Sprintf("post.%s", outputFormatExtension(format)))
 				err = post.WriteToFile(filePath, format, false)
 				require.NoError(t, err)
 
@@ -623,7 +623,7 @@ func TestArchiveWorkflow(t *testing.T) {
 				require.NoError(t, err)
 
 				// Verify archive file exists
-				indexPath := filepath.Join(formatDir, fmt.Sprintf("index.%s", format))
+				indexPath := filepath.Join(formatDir, fmt.Sprintf("index.%s", outputFormatExtension(format)))
 				assert.FileExists(t, indexPath)
 
 				// Verify content contains the post

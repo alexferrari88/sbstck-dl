@@ -364,7 +364,7 @@ func parseURL(toTest string) (*url.URL, error) {
 }
 
 func makePath(post lib.Post, outputFolder string, format string, layout string) string {
-	filename := fmt.Sprintf("%s_%s.%s", convertDateTime(post.PostDate), post.Slug, format)
+	filename := fmt.Sprintf("%s_%s.%s", convertDateTime(post.PostDate), post.Slug, outputFormatExtension(format))
 	year, month := postYearMonth(post.PostDate)
 
 	switch layout {
@@ -431,7 +431,7 @@ func filterExistingPosts(urls []string, outputFolder string, format string) ([]s
 
 func indexExistingSlugs(outputFolder string, format string) (map[string]struct{}, error) {
 	slugIndex := make(map[string]struct{})
-	ext := "." + format
+	ext := "." + outputFormatExtension(format)
 	if _, err := os.Stat(outputFolder); err != nil {
 		if os.IsNotExist(err) {
 			return slugIndex, nil
@@ -463,6 +463,13 @@ func indexExistingSlugs(outputFolder string, format string) (map[string]struct{}
 	}
 
 	return slugIndex, nil
+}
+
+func outputFormatExtension(format string) string {
+	if strings.EqualFold(format, "obsidian-md") {
+		return "obsidian.md"
+	}
+	return format
 }
 
 func slugFromFilename(base string) string {

@@ -575,7 +575,7 @@ func runDownload(ctx context.Context, observer DownloadObserver, useProgressBar 
 				log.Printf("Error generating archive page: %v\n", archiveErr)
 			}
 		} else if verbose {
-			fmt.Printf("Archive page generated: %s/index.%s\n", outputFolder, format)
+			fmt.Printf("Archive page generated: %s/index.%s\n", outputFolder, outputFormatExtension(format))
 		}
 	}
 
