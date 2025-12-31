@@ -6,7 +6,7 @@
   <meta name="csrf-token" content="{{CSRF_TOKEN}}">
   <title>Substack Downloader Wizard</title>
   <style>
-    @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;700&family=Space+Grotesk:wght@400;500;600&display=swap');
+    @import url('https://fonts.googleapis.com/css2|family=Fraunces:opsz,wght@9..144,600;700&family=Space+Grotesk:wght@400;500;600&display=swap');
     :root {
       color-scheme: light;
       --bg: #f5efe6;
@@ -466,12 +466,102 @@
       background: linear-gradient(140deg, rgba(255, 255, 255, 0.95), rgba(255, 255, 255, 0.75));
       transition: 0.2s ease;
       box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
+      text-align: left;
+      position: relative;
     }
     .preset-card input { margin-right: 8px; }
     .preset-card:hover { border-color: rgba(231, 111, 81, 0.4); transform: translateY(-1px); }
     .preset-title { font-size: 16px; font-weight: 600; color: var(--ink); }
     .preset-desc { font-size: 13px; color: var(--muted); }
     .preset-meta { font-size: 12px; color: #64748b; }
+    .preset-card.is-selected {
+      border-color: rgba(231, 111, 81, 0.55);
+      box-shadow: 0 16px 30px rgba(231, 111, 81, 0.2);
+      transform: translateY(-2px);
+    }
+    .section-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .toggle-field {
+      border: 1px solid rgba(15, 23, 42, 0.12);
+      border-radius: 12px;
+      padding: 10px 12px;
+      background: rgba(255, 255, 255, 0.9);
+      display: grid;
+      gap: 6px;
+      box-shadow: 0 6px 18px rgba(15, 23, 42, 0.06);
+    }
+    .toggle-field .toggle-row {
+      padding: 0;
+      border: none;
+      background: transparent;
+    }
+    .toggle-field .help {
+      margin-left: 28px;
+    }
+    .review-grid {
+      display: grid;
+      gap: 16px;
+      grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
+    }
+    .panel {
+      border: 1px solid rgba(15, 23, 42, 0.12);
+      border-radius: 18px;
+      padding: 18px;
+      background: rgba(255, 255, 255, 0.9);
+      display: grid;
+      gap: 12px;
+      box-shadow: 0 12px 26px rgba(15, 23, 42, 0.08);
+    }
+    .panel h3 {
+      margin: 0;
+      font-size: 18px;
+      color: var(--ink);
+    }
+    .panel-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+    .advanced-tools {
+      margin-top: 18px;
+      border: 1px dashed rgba(15, 23, 42, 0.18);
+      border-radius: 16px;
+      padding: 12px 14px;
+      background: rgba(255, 255, 255, 0.7);
+    }
+    .advanced-tools summary,
+    .progress-details summary {
+      cursor: pointer;
+      font-weight: 600;
+      color: var(--ink);
+      list-style: none;
+    }
+    .advanced-tools summary::-webkit-details-marker,
+    .progress-details summary::-webkit-details-marker {
+      display: none;
+    }
+    .advanced-tools summary::after,
+    .progress-details summary::after {
+      content: ">";
+      float: right;
+      transition: transform 0.2s ease;
+    }
+    .advanced-tools[open] summary::after,
+    .progress-details[open] summary::after {
+      transform: rotate(90deg);
+    }
+    .progress-details {
+      border: 1px dashed rgba(15, 23, 42, 0.16);
+      border-radius: 14px;
+      padding: 10px 12px;
+      background: rgba(255, 255, 255, 0.75);
+    }
     .quick-grid {
       display: grid;
       gap: 14px;
@@ -609,6 +699,7 @@
       .scene { padding: 22px 16px 40px; }
       .hero { grid-template-columns: 1fr; }
       .stepper { grid-template-columns: 1fr; }
+      .review-grid { grid-template-columns: 1fr; }
       .nav { flex-direction: column-reverse; align-items: stretch; }
     }
     @keyframes fadeUp {
@@ -653,137 +744,163 @@
 
     <div class="card">
       <div class="stepper">
-        <button class="step-pill active" data-step-pill="1" type="button"><span>Step 1</span>Start</button>
-        <button class="step-pill" data-step-pill="2" type="button"><span>Step 2</span>Configure</button>
-        <button class="step-pill" data-step-pill="3" type="button"><span>Step 3</span>Review</button>
+        <button class="step-pill active" data-step-pill="1" type="button"><span>Step 1</span>Essentials</button>
+        <button class="step-pill" data-step-pill="2" type="button"><span>Step 2</span>Options</button>
+        <button class="step-pill" data-step-pill="3" type="button"><span>Step 3</span>Review & run</button>
       </div>
 
       <form id="wizardForm">
         <section class="step-panel active" data-step="1">
-          <h2>Quick start</h2>
-          <p class="small">Use recommended defaults, then fill the essentials. You can fine-tune everything in Step 2.</p>
-          <div class="quick-grid">
-            <div class="summary-card">
-              <div class="summary-title">Recommended defaults</div>
-              <div class="summary-grid">
-                <div class="summary-item"><span>Format</span><strong>html</strong></div>
-                <div class="summary-item"><span>Archive</span><strong>on</strong></div>
-                <div class="summary-item"><span>Images</span><strong>on</strong></div>
-                <div class="summary-item"><span>Files</span><strong>off</strong></div>
-                <div class="summary-item"><span>Rate</span><strong>2 / sec</strong></div>
-                <div class="summary-item"><span>Workers</span><strong>10</strong></div>
-                <div class="summary-item"><span>Layout</span><strong>flat</strong></div>
-              </div>
-            </div>
-            <div class="summary-card">
-              <p class="small">Apply defaults in one click. Great for most archives.</p>
-              <button class="primary" data-defaults-btn type="button">Use recommended defaults</button>
-              <span class="help">You can edit any value in the next step.</span>
-            </div>
-          </div>
-        </section>
-
-        <section class="step-panel" data-step="2">
-          <h2>Configure the download</h2>
-          <p class="small">Start with the essentials. Turn on advanced options only if you need them.</p>
+          <h2>Essentials</h2>
+          <p class="small">Pick a starting preset, then add your URL. You can fine-tune everything on the next step.</p>
 
           <div class="group">
-            <h3>Quick actions</h3>
-            <div class="grid">
-              <div class="quick-actions">
-                <button class="primary" data-defaults-btn type="button">Use recommended defaults</button>
-                <span class="help">Applies the defaults shown on Step 1.</span>
-              </div>
-              <label class="toggle-row">
-                <input id="showAdvanced" type="checkbox" />
-                Show advanced options
-              </label>
+            <div class="section-head">
+              <h3>Choose a starting preset</h3>
+              <span class="help">Presets only change download options, not your URL or output folder.</span>
+            </div>
+            <div class="preset-grid">
+              <button class="preset-card" type="button" data-preset="archive">
+                <div class="preset-title">Full archive <span class="pill">Recommended</span></div>
+                <div class="preset-desc">Download everything, generate an index, and keep images for offline browsing.</div>
+                <div class="preset-meta">Archive on | Images on | Files off | Layout flat</div>
+              </button>
+              <button class="preset-card" type="button" data-preset="incremental">
+                <div class="preset-title">Incremental sync</div>
+                <div class="preset-desc">Skip existing posts and refresh newer ones while keeping the index up to date.</div>
+                <div class="preset-meta">Skip existing | Refresh updated | Archive on</div>
+              </button>
+              <button class="preset-card" type="button" data-preset="single">
+                <div class="preset-title">Single post</div>
+                <div class="preset-desc">Use when you paste a single post URL and want a fast, focused download.</div>
+                <div class="preset-meta">Archive off | Images on | Minimal extras</div>
+              </button>
+              <button class="preset-card" type="button" data-preset="custom">
+                <div class="preset-title">Custom</div>
+                <div class="preset-desc">Keep your current settings and tune everything manually.</div>
+                <div class="preset-meta">No changes applied</div>
+              </button>
             </div>
           </div>
 
           <div class="group">
-            <h3>Core</h3>
+            <h3>Required basics</h3>
             <div class="grid">
               <label class="field">
-                Substack URL <span class="flag">--url</span><span class="tip" title="Paste a publication URL or a single post URL.">?</span>
+                Substack URL <span class="flag">--url</span>
                 <input id="url" data-flag="--url" type="text" placeholder="https://example.substack.com" />
-                <span class="help">Example: https://example.substack.com or https://example.substack.com/p/post-title</span>
+                <span class="help">Publication or post URL. Example: https://example.substack.com/p/post-title</span>
                 <span class="error" data-error-for="url"></span>
               </label>
               <label class="field">
-                Output directory <span class="flag">--output</span><span class="tip" title="Where downloaded files will be saved.">?</span>
+                Parent folder <span class="flag">--output</span>
                 <div class="input-row">
-                  <input id="output" data-flag="--output" type="text" placeholder="." />
+                  <input id="outputParent" type="text" placeholder="C:\\Downloads" />
                   <button id="outputBrowseBtn" type="button">Browse</button>
                 </div>
-                <span class="help">Leave blank or "." to use the publication name.</span>
+                <span class="help">Choose where the publication folder should live.</span>
               </label>
+              <label class="toggle-row">
+                <input id="outputUsePublication" type="checkbox" checked />
+                Use publication name as subfolder
+              </label>
+              <div class="help">Final output: <span id="outputResolved">(publication name)</span></div>
+              <input id="output" data-flag="--output" type="text" hidden />
               <input id="outputDirPicker" type="file" webkitdirectory hidden />
               <label class="field">
-                Format <span class="flag">--format</span><span class="tip" title="HTML is recommended for full fidelity.">?</span>
+                Format <span class="flag">--format</span>
                 <select id="format" data-flag="--format" data-default="html">
                   <option value="html" selected>html</option>
                   <option value="md">md</option>
                   <option value="obsidian-md">obsidian-md</option>
                   <option value="txt">txt</option>
                 </select>
-                <span class="help">Recommended: html.</span>
+                <span class="help">html = best fidelity; obsidian-md = Obsidian-friendly.</span>
               </label>
             </div>
           </div>
 
+          <div class="hint">Tip: Paste a single post URL to download just one post.</div>
+        </section>
+
+        <section class="step-panel" data-step="2">
+          <h2>Download options</h2>
+          <p class="small">Decide what to save, then how it should be organized.</p>
+
           <div class="group">
-            <h3>Archive and assets</h3>
+            <h3>Content and index</h3>
             <div class="grid">
-              <label class="toggle-row">
-                <input id="createArchive" data-flag="--create-archive" type="checkbox" />
-                Create archive index <span class="flag">--create-archive</span>
-              </label>
-              <label class="toggle-row">
-                <input id="downloadImages" data-flag="--download-images" type="checkbox" />
-                Download images locally <span class="flag">--download-images</span><span class="tip" title="Recommended for offline browsing.">?</span>
-              </label>
-              <label class="toggle-row">
-                <input id="downloadFiles" data-flag="--download-files" type="checkbox" />
-                Download files locally <span class="flag">--download-files</span><span class="tip" title="Recommended if posts include attachments.">?</span>
-              </label>
+              <div class="toggle-field">
+                <label class="toggle-row">
+                  <input id="createArchive" data-flag="--create-archive" type="checkbox" />
+                  Create archive index <span class="flag">--create-archive</span>
+                </label>
+                <span class="help">Generates index.{format} with links and metadata.</span>
+              </div>
+              <div class="toggle-field">
+                <label class="toggle-row">
+                  <input id="writeMetadata" data-flag="--write-metadata" type="checkbox" />
+                  Write metadata sidecars <span class="flag">--write-metadata</span>
+                </label>
+                <span class="help">Adds a .json file with title/date/links per post.</span>
+              </div>
+              <div class="toggle-field">
+                <label class="toggle-row">
+                  <input id="addSourceUrl" data-flag="--add-source-url" type="checkbox" />
+                  Append source URL <span class="flag">--add-source-url</span>
+                </label>
+                <span class="help">Adds the original post URL to the end of each file.</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="group">
+            <h3>Assets</h3>
+            <div class="grid">
+              <div class="toggle-field">
+                <label class="toggle-row">
+                  <input id="downloadImages" data-flag="--download-images" type="checkbox" />
+                  Download images locally <span class="flag">--download-images</span>
+                </label>
+                <span class="help">Saves images under {output}/images/{slug} and rewrites links.</span>
+              </div>
               <label class="field">
-                Image quality <span class="flag">--image-quality</span><span class="tip" title="High is best quality but larger downloads.">?</span>
+                Image quality <span class="flag">--image-quality</span>
                 <select id="imageQuality" data-flag="--image-quality" data-default="high" data-requires="downloadImages">
                   <option value="high" selected>high</option>
                   <option value="medium">medium</option>
                   <option value="low">low</option>
                 </select>
-                <span class="help">Recommended: high.</span>
+                <span class="help">High = best quality; medium/low = smaller downloads.</span>
               </label>
               <label class="field">
-                Images directory <span class="flag">--images-dir</span>
+                Images folder <span class="flag">--images-dir</span>
                 <input id="imagesDir" data-flag="--images-dir" data-default="images" data-requires="downloadImages" type="text" value="images" />
+                <span class="help">Folder name under the output root.</span>
               </label>
+              <div class="toggle-field">
+                <label class="toggle-row">
+                  <input id="downloadFiles" data-flag="--download-files" type="checkbox" />
+                  Download file attachments <span class="flag">--download-files</span>
+                </label>
+                <span class="help">Saves attachments under {output}/files/{slug} and rewrites links.</span>
+              </div>
               <label class="field">
-                Files directory <span class="flag">--files-dir</span>
+                Files folder <span class="flag">--files-dir</span>
                 <input id="filesDir" data-flag="--files-dir" data-default="files" data-requires="downloadFiles" type="text" value="files" />
+                <span class="help">Folder name under the output root.</span>
               </label>
               <label class="field">
                 File extensions <span class="flag">--file-extensions</span>
                 <input id="fileExtensions" data-flag="--file-extensions" data-requires="downloadFiles" type="text" placeholder="pdf,docx" />
+                <span class="help">Optional filter, e.g. pdf,docx,txt.</span>
               </label>
             </div>
           </div>
 
-          <div class="group advanced-only" data-advanced="true">
-            <h3>Filters and layout</h3>
+          <div class="group">
+            <h3>Organization</h3>
             <div class="grid">
-              <label class="field">
-                After date <span class="flag">--after</span>
-                <input id="afterDate" data-flag="--after" type="text" placeholder="YYYY-MM-DD" />
-                <span class="error" data-error-for="afterDate"></span>
-              </label>
-              <label class="field">
-                Before date <span class="flag">--before</span>
-                <input id="beforeDate" data-flag="--before" type="text" placeholder="YYYY-MM-DD" />
-                <span class="error" data-error-for="beforeDate"></span>
-              </label>
               <label class="field">
                 Layout <span class="flag">--layout</span>
                 <select id="layout" data-flag="--layout" data-default="flat">
@@ -791,14 +908,36 @@
                   <option value="year/month">year/month</option>
                   <option value="year/slug">year/slug</option>
                 </select>
+                <span class="help">flat = single folder; year/month or year/slug for nesting.</span>
               </label>
+            </div>
+          </div>
+
+          <div class="group">
+            <div class="section-head">
+              <h3>Advanced options</h3>
               <label class="toggle-row">
-                <input id="writeMetadata" data-flag="--write-metadata" type="checkbox" />
-                Write metadata sidecars <span class="flag">--write-metadata</span>
+                <input id="showAdvanced" type="checkbox" />
+                Show advanced options
               </label>
-              <label class="toggle-row">
-                <input id="addSourceUrl" data-flag="--add-source-url" type="checkbox" />
-                Append source URL <span class="flag">--add-source-url</span>
+            </div>
+            <p class="small">Filters, error handling, performance, proxies, and private access.</p>
+          </div>
+
+          <div class="group advanced-only" data-advanced="true">
+            <h3>Filters</h3>
+            <div class="grid">
+              <label class="field">
+                After date <span class="flag">--after</span>
+                <input id="afterDate" data-flag="--after" type="text" placeholder="YYYY-MM-DD" />
+                <span class="help">Only download posts published after this date.</span>
+                <span class="error" data-error-for="afterDate"></span>
+              </label>
+              <label class="field">
+                Before date <span class="flag">--before</span>
+                <input id="beforeDate" data-flag="--before" type="text" placeholder="YYYY-MM-DD" />
+                <span class="help">Only download posts published before this date.</span>
+                <span class="error" data-error-for="beforeDate"></span>
               </label>
             </div>
           </div>
@@ -806,67 +945,91 @@
           <div class="group advanced-only" data-advanced="true">
             <h3>Run behavior</h3>
             <div class="grid">
-              <label class="toggle-row">
-                <input id="dryRun" data-flag="--dry-run" type="checkbox" />
-                Dry run <span class="flag">--dry-run</span>
-              </label>
-              <label class="toggle-row">
-                <input id="forceDownload" data-flag="--force" type="checkbox" data-exclusive="existing" />
-                Force redownload <span class="flag">--force</span>
-              </label>
-              <label class="toggle-row">
-                <input id="skipExisting" data-flag="--skip-existing" type="checkbox" data-exclusive="existing" />
-                Skip existing <span class="flag">--skip-existing</span>
-              </label>
-              <label class="toggle-row">
-                <input id="refreshUpdated" data-flag="--refresh-updated" type="checkbox" />
-                Refresh updated posts <span class="flag">--refresh-updated</span>
-              </label>
-              <label class="toggle-row">
-                <input id="failFast" data-flag="--fail-fast" type="checkbox" data-exclusive="errors" />
-                Fail fast <span class="flag">--fail-fast</span>
-              </label>
-              <label class="toggle-row">
-                <input id="continueOnError" data-flag="--continue-on-error" type="checkbox" data-exclusive="errors" />
-                Continue on error <span class="flag">--continue-on-error</span>
-              </label>
+              <div class="toggle-field">
+                <label class="toggle-row">
+                  <input id="dryRun" data-flag="--dry-run" type="checkbox" />
+                  Dry run <span class="flag">--dry-run</span>
+                </label>
+                <span class="help">Plan the download without writing files.</span>
+              </div>
+              <div class="toggle-field">
+                <label class="toggle-row">
+                  <input id="forceDownload" data-flag="--force" type="checkbox" data-exclusive="existing" />
+                  Force redownload <span class="flag">--force</span>
+                </label>
+                <span class="help">Ignore existing files and download everything again.</span>
+              </div>
+              <div class="toggle-field">
+                <label class="toggle-row">
+                  <input id="skipExisting" data-flag="--skip-existing" type="checkbox" data-exclusive="existing" />
+                  Skip existing <span class="flag">--skip-existing</span>
+                </label>
+                <span class="help">Skip posts already recorded in your manifest.</span>
+              </div>
+              <div class="toggle-field">
+                <label class="toggle-row">
+                  <input id="refreshUpdated" data-flag="--refresh-updated" type="checkbox" />
+                  Refresh updated posts <span class="flag">--refresh-updated</span>
+                </label>
+                <span class="help">Redownload when sitemap lastmod is newer.</span>
+              </div>
+              <div class="toggle-field">
+                <label class="toggle-row">
+                  <input id="failFast" data-flag="--fail-fast" type="checkbox" data-exclusive="errors" />
+                  Fail fast <span class="flag">--fail-fast</span>
+                </label>
+                <span class="help">Stop on the first error.</span>
+              </div>
+              <div class="toggle-field">
+                <label class="toggle-row">
+                  <input id="continueOnError" data-flag="--continue-on-error" type="checkbox" data-exclusive="errors" />
+                  Continue on error <span class="flag">--continue-on-error</span>
+                </label>
+                <span class="help">Keep going even if some posts fail.</span>
+              </div>
             </div>
           </div>
 
-          <div class="group">
+          <div class="group advanced-only" data-advanced="true">
             <h3>Performance and logging</h3>
             <div class="grid">
               <label class="field">
-                Rate per second <span class="flag">--rate</span><span class="tip" title="Lower rates reduce server load.">?</span>
+                Rate per second <span class="flag">--rate</span>
                 <input id="rate" data-flag="--rate" data-default="2" type="text" value="2" />
-                <span class="help">Recommended: 2.</span>
+                <span class="help">Requests per second. Lower is safer for large archives.</span>
               </label>
               <label class="field">
-                Max workers <span class="flag">--max-workers</span><span class="tip" title="More workers increase parallel downloads.">?</span>
+                Max workers <span class="flag">--max-workers</span>
                 <input id="maxWorkers" data-flag="--max-workers" data-default="10" type="text" value="10" />
-                <span class="help">Recommended: 10.</span>
+                <span class="help">Parallel downloads (still rate-limited).</span>
               </label>
-              <label class="field advanced-only" data-advanced="true">
+              <label class="field">
                 Proxy URL <span class="flag">--proxy</span>
                 <input id="proxy" data-flag="--proxy" type="text" placeholder="http://localhost:8080" />
+                <span class="help">Only needed if you must route traffic through a proxy.</span>
                 <span class="error" data-error-for="proxy"></span>
               </label>
-              <label class="field advanced-only" data-advanced="true">
+              <label class="field">
                 Log format <span class="flag">--log-format</span>
                 <select id="logFormat" data-flag="--log-format" data-default="text">
                   <option value="text" selected>text</option>
                   <option value="json">json</option>
                 </select>
+                <span class="help">text for humans, json for scripts.</span>
               </label>
-              <label class="toggle-row advanced-only" data-advanced="true">
-                <input id="verbose" data-flag="--verbose" type="checkbox" />
-                Verbose output <span class="flag">--verbose</span>
-              </label>
+              <div class="toggle-field">
+                <label class="toggle-row">
+                  <input id="verbose" data-flag="--verbose" type="checkbox" />
+                  Verbose output <span class="flag">--verbose</span>
+                </label>
+                <span class="help">Extra logs for troubleshooting.</span>
+              </div>
             </div>
           </div>
 
           <div class="group advanced-only" data-advanced="true">
-            <h3>Private newsletter auth</h3>
+            <h3>Private newsletter access</h3>
+            <p class="small">Only needed for private posts. Use one cookie source.</p>
             <div class="grid">
               <label class="field">
                 Cookie name <span class="flag">--cookie_name</span>
@@ -875,6 +1038,7 @@
                   <option value="substack.sid">substack.sid</option>
                   <option value="connect.sid">connect.sid</option>
                 </select>
+                <span class="help">Pick the cookie name from your browser.</span>
               </label>
               <label class="field">
                 Cookie value <span class="flag">--cookie_val</span>
@@ -897,42 +1061,86 @@
                 <button type="button" id="saveCookieBtn">Save cookie to keychain</button>
                 <div id="cookieStoreStatus" class="test-status">No keychain entry saved.</div>
               </div>
-              <label class="field">
-                Notion labels <span class="flag">--notion-labels</span>
-                <input id="notionLabels" data-flag="--notion-labels" type="text" placeholder="path/to/notion-labels.yaml" />
-              </label>
             </div>
           </div>
 
-          <div class="group">
-            <h3>Test connection</h3>
-            <p class="small">Fetches sitemap.xml and optionally tests a private post URL using your cookie.</p>
+          <div class="group advanced-only" data-advanced="true">
+            <h3>Integrations</h3>
             <div class="grid">
               <label class="field">
-                Private post URL
-                <input id="privateUrl" type="text" placeholder="https://example.substack.com/p/private-post" />
-                <span class="help">Optional. Requires cookie fields above.</span>
-                <span class="error" data-error-for="privateUrl"></span>
+                Notion labels <span class="flag">--notion-labels</span>
+                <input id="notionLabels" data-flag="--notion-labels" type="text" placeholder="path/to/notion-labels.yaml" />
+                <span class="help">Optional: map Notion URLs to friendly labels.</span>
               </label>
-              <div>
-                <button type="button" id="testBtn" class="primary">Test connection</button>
-                <div id="testStatus" class="test-status">Run a test to verify access.</div>
-              </div>
             </div>
           </div>
         </section>
 
         <section class="step-panel" data-step="3">
-          <div class="review">
-            <h2>Review command</h2>
-            <p>Copy and run this command in your terminal.</p>
-            <pre id="commandPreview">sbstck-dl download</pre>
-            <div class="review-actions">
-              <button type="button" id="copyBtn">Copy command</button>
-              <span id="copyStatus" class="small"></span>
+          <h2>Review & run</h2>
+          <p class="small">Copy the CLI command or run the download directly from this UI.</p>
+
+          <div class="review-grid">
+            <div class="panel">
+              <h3>Command preview</h3>
+              <pre id="commandPreview">sbstck-dl download</pre>
+              <div class="panel-actions">
+                <button type="button" id="copyBtn">Copy command</button>
+                <span id="copyStatus" class="small"></span>
+              </div>
+              <div id="reviewStatus" class="hint">Tip: add a URL to target a single post or a publication.</div>
+              <ul id="validationErrors" class="error-list" hidden></ul>
             </div>
-            <div id="reviewStatus" class="hint">Tip: add a URL to target a single post or a publication.</div>
-            <ul id="validationErrors" class="error-list" hidden></ul>
+
+            <div class="panel">
+              <h3>Run from this UI</h3>
+              <p class="small">Run a preview to estimate the download, then start the job.</p>
+              <div class="panel-actions">
+                <button type="button" id="previewBtn">Run preview</button>
+                <button type="button" id="startJobBtn" class="primary">Start download</button>
+                <button type="button" id="cancelJobBtn">Cancel</button>
+              </div>
+              <div id="previewStatus" class="test-status">No preview run yet.</div>
+              <div id="previewResults" class="preview-card" hidden>
+                <div class="preview-grid">
+                  <div class="preview-tile"><span>Total posts</span><strong id="previewTotal">0</strong></div>
+                  <div class="preview-tile"><span>Will download</span><strong id="previewDownload">0</strong></div>
+                  <div class="preview-tile"><span>Skipped</span><strong id="previewSkipped">0</strong></div>
+                  <div class="preview-tile"><span>Refreshed</span><strong id="previewRefreshed">0</strong></div>
+                </div>
+                <div class="preview-grid">
+                  <div class="preview-tile"><span>Oldest</span><strong id="previewOldest">-</strong></div>
+                  <div class="preview-tile"><span>Newest</span><strong id="previewNewest">-</strong></div>
+                </div>
+              </div>
+              <div id="jobStatus" class="test-status">No job running.</div>
+              <details id="progressDetails" class="progress-details">
+                <summary>Live progress and logs</summary>
+                <div id="jobMetrics" class="preview-card" hidden>
+                  <div class="preview-grid">
+                    <div class="preview-tile"><span>Total</span><strong id="jobTotal">0</strong></div>
+                    <div class="preview-tile"><span>Downloaded</span><strong id="jobDownloaded">0</strong></div>
+                    <div class="preview-tile"><span>Skipped</span><strong id="jobSkipped">0</strong></div>
+                    <div class="preview-tile"><span>Failed</span><strong id="jobFailed">0</strong></div>
+                    <div class="preview-tile"><span>Retries</span><strong id="jobRetries">0</strong></div>
+                  </div>
+                  <div class="job-grid">
+                    <div class="job-box">
+                      <span>Logs</span>
+                      <div id="jobLogs" class="job-list"></div>
+                    </div>
+                    <div class="job-box">
+                      <span>Posts</span>
+                      <div id="jobPosts" class="job-list"></div>
+                    </div>
+                  </div>
+                </div>
+              </details>
+            </div>
+          </div>
+
+          <details class="advanced-tools">
+            <summary>Advanced tools</summary>
             <div class="group">
               <h3>Profiles and config</h3>
               <p class="small">Save settings locally and export/import JSON config files. Cookies are only stored if you opt in.</p>
@@ -956,24 +1164,6 @@
               <div id="profileList" class="profile-list"></div>
             </div>
             <div class="group">
-              <h3>Dry-run preview</h3>
-              <p class="small">See how many posts will be downloaded or skipped before running.</p>
-              <button type="button" id="previewBtn" class="primary">Run preview</button>
-              <div id="previewStatus" class="test-status">No preview run yet.</div>
-              <div id="previewResults" class="preview-card" hidden>
-                <div class="preview-grid">
-                  <div class="preview-tile"><span>Total posts</span><strong id="previewTotal">0</strong></div>
-                  <div class="preview-tile"><span>Will download</span><strong id="previewDownload">0</strong></div>
-                  <div class="preview-tile"><span>Skipped</span><strong id="previewSkipped">0</strong></div>
-                  <div class="preview-tile"><span>Refreshed</span><strong id="previewRefreshed">0</strong></div>
-                </div>
-                <div class="preview-grid">
-                  <div class="preview-tile"><span>Oldest</span><strong id="previewOldest">-</strong></div>
-                  <div class="preview-tile"><span>Newest</span><strong id="previewNewest">-</strong></div>
-                </div>
-              </div>
-            </div>
-            <div class="group">
               <h3>Incremental sync</h3>
               <p class="small">Check for new posts since your last run and rerun quickly.</p>
               <div class="review-actions">
@@ -989,34 +1179,22 @@
               </div>
             </div>
             <div class="group">
-              <h3>Background job</h3>
-              <p class="small">Run the download in the background with live progress and logs.</p>
-              <div class="review-actions">
-                <button type="button" id="startJobBtn" class="primary">Start download</button>
-                <button type="button" id="cancelJobBtn">Cancel</button>
-              </div>
-              <div id="jobStatus" class="test-status">No job running.</div>
-              <div id="jobMetrics" class="preview-card" hidden>
-                <div class="preview-grid">
-                  <div class="preview-tile"><span>Total</span><strong id="jobTotal">0</strong></div>
-                  <div class="preview-tile"><span>Downloaded</span><strong id="jobDownloaded">0</strong></div>
-                  <div class="preview-tile"><span>Skipped</span><strong id="jobSkipped">0</strong></div>
-                  <div class="preview-tile"><span>Failed</span><strong id="jobFailed">0</strong></div>
-                  <div class="preview-tile"><span>Retries</span><strong id="jobRetries">0</strong></div>
-                </div>
-                <div class="job-grid">
-                  <div class="job-box">
-                    <span>Logs</span>
-                    <div id="jobLogs" class="job-list"></div>
-                  </div>
-                  <div class="job-box">
-                    <span>Posts</span>
-                    <div id="jobPosts" class="job-list"></div>
-                  </div>
+              <h3>Verify access</h3>
+              <p class="small">Fetches sitemap.xml and optionally tests a private post URL using your cookie.</p>
+              <div class="grid">
+                <label class="field">
+                  Private post URL
+                  <input id="privateUrl" type="text" placeholder="https://example.substack.com/p/private-post" />
+                  <span class="help">Optional. Requires cookie fields from Step 2.</span>
+                  <span class="error" data-error-for="privateUrl"></span>
+                </label>
+                <div>
+                  <button type="button" id="testBtn" class="primary">Test connection</button>
+                  <div id="testStatus" class="test-status">Run a test to verify access.</div>
                 </div>
               </div>
             </div>
-          </div>
+          </details>
         </section>
       </form>
 
@@ -1048,12 +1226,16 @@
       const presetInputs = Array.from(document.querySelectorAll('input[name="preset"]'));
       const defaultsButtons = Array.from(document.querySelectorAll('[data-defaults-btn]'));
       const advancedGroups = Array.from(document.querySelectorAll('[data-advanced="true"]'));
+      const presetCards = Array.from(document.querySelectorAll('.preset-card[data-preset]'));
       const errorTargets = {};
       document.querySelectorAll('[data-error-for]').forEach(el => {
         errorTargets[el.dataset.errorFor] = el;
       });
       const urlInput = document.getElementById('url');
       const outputInput = document.getElementById('output');
+      const outputParentInput = document.getElementById('outputParent');
+      const outputUsePublication = document.getElementById('outputUsePublication');
+      const outputResolved = document.getElementById('outputResolved');
       const outputBrowseBtn = document.getElementById('outputBrowseBtn');
       const outputDirPicker = document.getElementById('outputDirPicker');
       const showAdvancedToggle = document.getElementById('showAdvanced');
@@ -1090,6 +1272,7 @@
       const cancelJobBtn = document.getElementById('cancelJobBtn');
       const jobStatus = document.getElementById('jobStatus');
       const jobMetrics = document.getElementById('jobMetrics');
+      const progressDetails = document.getElementById('progressDetails');
       const jobTotal = document.getElementById('jobTotal');
       const jobDownloaded = document.getElementById('jobDownloaded');
       const jobSkipped = document.getElementById('jobSkipped');
@@ -1106,6 +1289,7 @@
       const cookieStoreStatus = document.getElementById('cookieStoreStatus');
       let currentStep = 1;
       let activePreset = 'basic';
+      let activeQuickPreset = '';
       let activeJobId = '';
       let jobPollTimer = null;
 
@@ -1232,12 +1416,197 @@
       }
 
       function setOutputPath(value) {
-        if (!outputInput || !value) return;
-        outputInput.value = value;
-        outputInput.dispatchEvent(new Event('input', { bubbles: true }));
+        if (!outputParentInput || !value) return;
+        outputParentInput.value = value;
+        updateResolvedOutput();
+        buildCommand();
+      }
+
+      function sanitizeFolderName(value) {
+        const trimmed = (value || '').trim();
+        if (!trimmed) return '';
+        let out = '';
+        let prevDash = false;
+        for (let i = 0; i < trimmed.length; i++) {
+          const ch = trimmed[i];
+          const code = ch.charCodeAt(0);
+          const isAlphaNum = (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122);
+          if (isAlphaNum || ch === '-' || ch === '_' || ch === '.') {
+            out += ch;
+            prevDash = false;
+          } else if (!prevDash) {
+            out += '-';
+            prevDash = true;
+          }
+        }
+        return out.replace(/^[-.]+|[-.]+$/g, '');
+      }
+
+      function derivePublicationNameFromURL(value) {
+        const trimmed = (value || '').trim();
+        if (!trimmed) return '';
+        try {
+          const parsed = new URL(trimmed);
+          let host = (parsed.hostname || '').toLowerCase();
+          if (host.startsWith('www.')) {
+            host = host.slice(4);
+          }
+          if (host === 'substack.com') {
+            const path = (parsed.pathname || '').replace(/^\/+|\/+$/g, '');
+            if (path.startsWith('@') && path.length > 1) {
+              return sanitizeFolderName(path.slice(1));
+            }
+            return sanitizeFolderName(host);
+          }
+          if (host.endsWith('.substack.com')) {
+            const name = host.slice(0, -'.substack.com'.length);
+            if (name) return sanitizeFolderName(name);
+          }
+          return sanitizeFolderName(host);
+        } catch (err) {
+          return '';
+        }
+      }
+
+      function pathBase(value) {
+        const trimmed = (value || '').replace(/[\\\\/]+$/, '');
+        const parts = trimmed.split(/[\\\\/]+/);
+        return parts[parts.length - 1] || '';
+      }
+
+      function joinPath(base, segment) {
+        const trimmed = (base || '').replace(/[\\\\/]+$/, '');
+        const separator = trimmed.includes('\\\\') && !trimmed.includes('/') ? '\\\\' : '/';
+        return trimmed + separator + segment;
+      }
+
+      function stripPublicationSuffix(value, publication) {
+        const trimmed = (value || '').replace(/[\\\\/]+$/, '');
+        if (!trimmed || !publication) {
+          return { base: value || '', matched: false };
+        }
+        const parts = trimmed.split(/[\\\\/]+/);
+        const last = parts[parts.length - 1] || '';
+        if (last.toLowerCase() === publication.toLowerCase()) {
+          parts.pop();
+          const separator = trimmed.includes('\\\\') && !trimmed.includes('/') ? '\\\\' : '/';
+          return { base: parts.join(separator), matched: true };
+        }
+        return { base: value || '', matched: false };
+      }
+
+      function resolveOutputPath() {
+        const baseRaw = outputParentInput ? outputParentInput.value.trim() : '';
+        const usePublication = outputUsePublication ? outputUsePublication.checked : false;
+        const urlValue = (urlInput && !urlInput.disabled) ? urlInput.value.trim() : '';
+        const publication = derivePublicationNameFromURL(urlValue);
+        const baseEmpty = baseRaw === '' || baseRaw === '.';
+
+        if (usePublication && publication) {
+          if (baseEmpty) {
+            return { resolved: '', display: publication };
+          }
+          const last = pathBase(baseRaw).toLowerCase();
+          const pubLower = publication.toLowerCase();
+          const resolved = last === pubLower ? baseRaw : joinPath(baseRaw, publication);
+          return { resolved: resolved, display: resolved };
+        }
+
+        if (baseEmpty) {
+          if (usePublication) {
+            return { resolved: '', display: publication || '(publication name)' };
+          }
+          return { resolved: '', display: '(choose a folder)' };
+        }
+        return { resolved: baseRaw, display: baseRaw };
+      }
+
+      function updateResolvedOutput() {
+        const resolved = resolveOutputPath();
+        if (outputInput) {
+          outputInput.value = resolved.resolved || '';
+        }
+        if (outputResolved) {
+          outputResolved.textContent = resolved.display || '';
+        }
+      }
+
+      function applyQuickPreset(value) {
+        if (!value || value === 'custom') {
+          return;
+        }
+
+        const setValue = (id, presetValue) => {
+          const el = document.getElementById(id);
+          if (!el) return;
+          el.value = String(presetValue);
+        };
+        const setChecked = (id, presetValue) => {
+          const el = document.getElementById(id);
+          if (!el) return;
+          el.checked = Boolean(presetValue);
+        };
+
+        if (value === 'archive') {
+          setChecked('createArchive', true);
+          setChecked('downloadImages', true);
+          setChecked('downloadFiles', false);
+          setChecked('skipExisting', false);
+          setChecked('refreshUpdated', false);
+          setChecked('forceDownload', false);
+          setChecked('dryRun', false);
+          setChecked('failFast', false);
+          setChecked('continueOnError', false);
+          setValue('layout', 'flat');
+          setValue('rate', '2');
+          setValue('maxWorkers', '10');
+        } else if (value === 'incremental') {
+          setChecked('createArchive', true);
+          setChecked('downloadImages', true);
+          setChecked('downloadFiles', false);
+          setChecked('skipExisting', true);
+          setChecked('refreshUpdated', true);
+          setChecked('forceDownload', false);
+          setChecked('dryRun', false);
+          setChecked('failFast', false);
+          setChecked('continueOnError', false);
+          setValue('layout', 'flat');
+          setValue('rate', '2');
+          setValue('maxWorkers', '10');
+          if (showAdvancedToggle) {
+            showAdvancedToggle.checked = true;
+            setPreset('advanced');
+          }
+        } else if (value === 'single') {
+          setChecked('createArchive', false);
+          setChecked('downloadImages', true);
+          setChecked('downloadFiles', false);
+          setChecked('skipExisting', false);
+          setChecked('refreshUpdated', false);
+          setChecked('forceDownload', false);
+          setChecked('dryRun', false);
+          setChecked('failFast', false);
+          setChecked('continueOnError', false);
+          setValue('layout', 'flat');
+          setValue('rate', '2');
+          setValue('maxWorkers', '10');
+        }
+      }
+
+      function setQuickPreset(value) {
+        activeQuickPreset = value || '';
+        presetCards.forEach(card => {
+          card.classList.toggle('is-selected', card.dataset.preset === activeQuickPreset);
+        });
+        applyQuickPreset(activeQuickPreset);
+        buildCommand();
       }
 
       function applyRecommendedDefaults() {
+        if (presetCards.length) {
+          setQuickPreset('archive');
+          return;
+        }
         const setValue = (id, value) => {
           const el = document.getElementById(id);
           if (!el) return;
@@ -1249,7 +1618,6 @@
           el.checked = Boolean(value);
         };
 
-        setValue('format', 'html');
         setChecked('createArchive', true);
         setChecked('downloadImages', true);
         setChecked('downloadFiles', false);
@@ -1261,6 +1629,9 @@
       }
 
       function buildCommand() {
+        if (outputParentInput) {
+          updateResolvedOutput();
+        }
         const parts = ['sbstck-dl', 'download'];
         const elements = Array.from(form.querySelectorAll('[data-flag]'));
 
@@ -1311,6 +1682,9 @@
         if (target && target.dataset && target.dataset.exclusive) {
           handleExclusiveGroups(target);
         }
+        if (target && (target.id === 'outputParent' || target.id === 'outputUsePublication' || target.id === 'url')) {
+          updateResolvedOutput();
+        }
         buildCommand();
       });
 
@@ -1321,6 +1695,15 @@
             if (currentStep === 1) {
               showStep(2);
             }
+          });
+        });
+      }
+
+      if (presetCards.length) {
+        presetCards.forEach(card => {
+          card.addEventListener('click', function () {
+            const preset = card.dataset.preset || 'custom';
+            setQuickPreset(preset);
           });
         });
       }
@@ -1677,6 +2060,9 @@
         if (data.status === 'running') {
           setJobStatus('Running download...', '');
           setJobButtons(true);
+          if (progressDetails) {
+            progressDetails.open = true;
+          }
           return;
         }
         if (data.status === 'completed') {
@@ -1815,9 +2201,10 @@
 
       function shouldUseAdvanced(config) {
         const advancedKeys = [
-          'after', 'before', 'layout', 'write_metadata', 'add_source_url',
+          'after', 'before', 'write_metadata', 'add_source_url',
           'dry_run', 'force', 'skip_existing', 'refresh_updated',
-          'fail_fast', 'continue_on_error', 'proxy', 'log_format',
+          'fail_fast', 'continue_on_error', 'rate', 'max_workers',
+          'proxy', 'log_format',
           'cookie_name', 'cookie_val', 'cookie_val_file', 'cookie_jar', 'cookie_keychain',
           'notion_labels', 'verbose'
         ];
@@ -1861,7 +2248,31 @@
         };
 
         setValue('url', config.url);
-        setValue('output', config.output);
+        if (outputUsePublication) {
+          outputUsePublication.checked = true;
+        }
+        if (outputParentInput) {
+          outputParentInput.value = '';
+        }
+        if (config.output) {
+          const pubName = derivePublicationNameFromURL(config.url || '');
+          if (pubName) {
+            const stripped = stripPublicationSuffix(config.output, pubName);
+            if (outputUsePublication) {
+              outputUsePublication.checked = stripped.matched;
+            }
+            if (outputParentInput) {
+              outputParentInput.value = stripped.base;
+            }
+          } else {
+            if (outputUsePublication) {
+              outputUsePublication.checked = false;
+            }
+            if (outputParentInput) {
+              outputParentInput.value = config.output;
+            }
+          }
+        }
         setValue('format', config.format);
         setChecked('dryRun', config.dry_run);
         setChecked('addSourceUrl', config.add_source_url);
@@ -1897,7 +2308,11 @@
         setValue('logFormat', config.log_format);
         setChecked('verbose', config.verbose);
 
-        buildCommand();
+        if (presetCards.length) {
+          setQuickPreset('custom');
+        } else {
+          buildCommand();
+        }
       }
 
       const profileStorageKey = 'sbstckProfiles';
@@ -2080,6 +2495,9 @@
         if (jobLogs) jobLogs.innerHTML = '';
         if (jobPosts) jobPosts.innerHTML = '';
         if (jobMetrics) jobMetrics.hidden = false;
+        if (progressDetails) {
+          progressDetails.open = true;
+        }
 
         apiFetch('/api/jobs/start', payload).then(res => res.json()).then(data => {
           if (data && data.error) {
@@ -2191,9 +2609,15 @@
       setPreset('basic');
       setJobButtons(false);
       renderProfiles();
-      buildCommand();
+      if (presetCards.length) {
+        setQuickPreset('archive');
+      } else {
+        buildCommand();
+      }
       showStep(1);
     })();
   </script>
 </body>
 </html>
+
+
