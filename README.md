@@ -65,6 +65,7 @@ When downloading the full archive, if the downloader is interrupted, at the next
 A `manifest.json` file is written in the output directory with canonical URLs, local paths, download times, and content hashes.
 On reruns, URLs already recorded in the manifest (with matching format and existing file) are skipped.
 If any posts fail to download, a `failed-urls.txt` file is written in the output directory for retrying later.
+If `--output` is omitted or set to `.`, files are written under a folder named after the publication.
 Use `--refresh-updated` to re-download posts when the sitemap `lastmod` is newer than the manifest.
 Use `--layout` to control how output files are organized (flat, year/month, year/slug).
 Use `--write-metadata` to write a JSON sidecar for each downloaded post (includes `notion_links` when present).
@@ -88,7 +89,7 @@ Flags:
       --image-quality string   Image quality to download (options: "high", "medium", "low") (default "high")
       --images-dir string      Directory name for downloaded images (default "images")
       --layout string          Output layout (flat, year/month, year/slug) (default "flat")
-  -o, --output string          Specify the download directory (default ".")
+  -o, --output string          Specify the download directory (default: publication name when empty or ".")
       --write-metadata         Write a JSON sidecar with post metadata
       --refresh-updated        Refresh posts when sitemap lastmod is newer than the manifest
       --skip-existing          Skip existing posts (default for archive downloads)

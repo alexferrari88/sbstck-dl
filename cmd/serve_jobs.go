@@ -440,6 +440,7 @@ func applyJobConfig(req jobStartRequest, job *downloadJob) error {
 		outputFolder = "."
 	}
 	downloadUrl = strings.TrimSpace(req.URL)
+	outputFolder = resolveOutputFolder(outputFolder, downloadUrl)
 	addSourceURL = req.AddSourceURL
 	createArchive = req.CreateArchive
 	downloadImages = req.DownloadImages

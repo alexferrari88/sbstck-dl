@@ -27,6 +27,7 @@ func runDownload(ctx context.Context, observer DownloadObserver, useProgressBar 
 	if !isValidLayout(layout) {
 		return summary, fmt.Errorf("invalid --layout %q (use flat, year/month, or year/slug)", layout)
 	}
+	outputFolder = resolveOutputFolder(outputFolder, downloadUrl)
 	failedURLs := make([]string, 0)
 	failedURLSet := make(map[string]struct{})
 	failFastMode := failFast

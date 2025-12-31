@@ -274,10 +274,11 @@ func servePreview(w http.ResponseWriter, r *http.Request) {
 		format = "html"
 	}
 
-	outputDir := strings.TrimSpace(req.Output)
-	if outputDir == "" {
-		outputDir = "."
+	pubURLString := ""
+	if pubURL != nil {
+		pubURLString = pubURL.String()
 	}
+	outputDir := resolveOutputFolder(req.Output, pubURLString)
 
 	domainHint := ""
 	if pubURL != nil {

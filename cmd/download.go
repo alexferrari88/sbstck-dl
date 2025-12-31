@@ -51,7 +51,7 @@ var (
 func init() {
 	downloadCmd.Flags().StringVarP(&downloadUrl, "url", "u", "", "Specify the Substack url")
 	downloadCmd.Flags().StringVarP(&format, "format", "f", "html", "Specify the output format (options: \"html\", \"md\", \"obsidian-md\", \"txt\"")
-	downloadCmd.Flags().StringVarP(&outputFolder, "output", "o", ".", "Specify the download directory")
+	downloadCmd.Flags().StringVarP(&outputFolder, "output", "o", ".", "Specify the download directory (default: publication name when empty or \".\")")
 	downloadCmd.Flags().BoolVarP(&dryRun, "dry-run", "d", false, "Enable dry run")
 	downloadCmd.Flags().BoolVar(&addSourceURL, "add-source-url", false, "Add the original post URL at the end of the downloaded file")
 	downloadCmd.Flags().BoolVar(&downloadImages, "download-images", false, "Download images locally and update content to reference local files")
