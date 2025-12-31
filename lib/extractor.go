@@ -37,20 +37,50 @@ func (r *RawPost) ToPost() (Post, error) {
 
 // Post represents a structured Substack post with various fields.
 type Post struct {
-	Id               int    `json:"id"`
-	PublicationId    int    `json:"publication_id"`
-	Type             string `json:"type"`
-	Slug             string `json:"slug"`
-	PostDate         string `json:"post_date"`
-	CanonicalUrl     string `json:"canonical_url"`
-	PreviousPostSlug string `json:"previous_post_slug"`
-	NextPostSlug     string `json:"next_post_slug"`
-	CoverImage       string `json:"cover_image"`
-	Description      string `json:"description"`
-	Subtitle         string `json:"subtitle,omitempty"`
-	WordCount        int    `json:"wordcount"`
-	Title            string `json:"title"`
-	BodyHTML         string `json:"body_html"`
+	Id               int       `json:"id"`
+	PublicationId    int       `json:"publication_id"`
+	Type             string    `json:"type"`
+	Slug             string    `json:"slug"`
+	PostDate         string    `json:"post_date"`
+	PublishedAt      string    `json:"published_at,omitempty"`
+	FirstPublishedAt string    `json:"first_published_at,omitempty"`
+	CanonicalUrl     string    `json:"canonical_url"`
+	PreviousPostSlug string    `json:"previous_post_slug"`
+	NextPostSlug     string    `json:"next_post_slug"`
+	CoverImage       string    `json:"cover_image"`
+	Description      string    `json:"description"`
+	Subtitle         string    `json:"subtitle,omitempty"`
+	WordCount        int       `json:"wordcount"`
+	Title            string    `json:"title"`
+	BodyHTML         string    `json:"body_html"`
+	Tags             []PostTag `json:"tags,omitempty"`
+	Categories       []PostTag `json:"categories,omitempty"`
+}
+
+type PostTag struct {
+	Name string `json:"name"`
+	Slug string `json:"slug"`
+}
+
+func (t *PostTag) UnmarshalJSON(data []byte) error {
+	if len(data) == 0 || string(data) == "null" {
+		return nil
+	}
+	if data[0] == '"' {
+		var value string
+		if err := json.Unmarshal(data, &value); err != nil {
+			return nil
+		}
+		t.Name = value
+		return nil
+	}
+	type alias PostTag
+	var aux alias
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return nil
+	}
+	*t = PostTag(aux)
+	return nil
 }
 
 // Static converter instance to avoid recreating it for each conversion
@@ -184,7 +214,7 @@ func (p *Post) WriteToFileWithImages(ctx context.Context, path string, format st
 			}
 			content = fmt.Sprintf("# %s\n\n%s", p.Title, updatedContent)
 		} else if format == "obsidian-md" {
-			updatedContent, err := convertHTMLToObsidianMarkdown(imageResult.UpdatedHTML, p.Title, true)
+			updatedContent, err := convertHTMLToObsidianMarkdown(imageResult.UpdatedHTML, *p, true)
 			if err != nil {
 				return nil, fmt.Errorf("failed to convert updated HTML to Obsidian markdown: %w", err)
 			}
@@ -237,7 +267,7 @@ func (p *Post) WriteToFileWithImages(ctx context.Context, path string, format st
 				}
 				content = fmt.Sprintf("# %s\n\n%s", p.Title, updatedContent)
 			} else if format == "obsidian-md" {
-				updatedContent, err := convertHTMLToObsidianMarkdown(fileResult.UpdatedHTML, p.Title, true)
+				updatedContent, err := convertHTMLToObsidianMarkdown(fileResult.UpdatedHTML, *p, true)
 				if err != nil {
 					return nil, fmt.Errorf("failed to convert updated HTML to Obsidian markdown: %w", err)
 				}

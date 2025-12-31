@@ -3,28 +3,55 @@ package lib
 import (
 	"fmt"
 	"strings"
+	"time"
 )
 
 // ToObsidianMD converts the Post's HTML body to Obsidian-optimized Markdown.
 func (p *Post) ToObsidianMD(withTitle bool) (string, error) {
-	return convertHTMLToObsidianMarkdown(p.BodyHTML, p.Title, withTitle)
+	return convertHTMLToObsidianMarkdown(p.BodyHTML, *p, withTitle)
 }
 
-func convertHTMLToObsidianMarkdown(html, title string, withTitle bool) (string, error) {
+func convertHTMLToObsidianMarkdown(html string, post Post, withTitle bool) (string, error) {
 	mdContent, err := mdConverter.ConvertString(html)
 	if err != nil {
 		return "", err
 	}
 	if withTitle {
-		mdContent = fmt.Sprintf("# %s\n\n%s", title, mdContent)
+		mdContent = fmt.Sprintf("# %s\n\n%s", post.Title, mdContent)
 	}
-	return transformObsidianMarkdown(mdContent), nil
+	return renderObsidianMarkdown(mdContent, post), nil
 }
 
 func transformObsidianMarkdown(content string) string {
 	normalized := normalizeLineEndings(content)
-	frontmatter, body := splitFrontmatter(normalized)
-	return frontmatter + transformOutsideCodeFences(body)
+	frontmatter, body, hasFrontmatter := extractFrontmatter(normalized)
+	if hasFrontmatter {
+		if body == "" {
+			return frontmatter
+		}
+		return frontmatter + "\n" + transformOutsideCodeFences(body)
+	}
+	return transformOutsideCodeFences(normalized)
+}
+
+func renderObsidianMarkdown(content string, post Post) string {
+	normalized := normalizeLineEndings(content)
+	frontmatter, body, hasFrontmatter := extractFrontmatter(normalized)
+	if hasFrontmatter {
+		if body == "" {
+			return frontmatter
+		}
+		return frontmatter + "\n" + transformOutsideCodeFences(body)
+	}
+	body = transformOutsideCodeFences(normalized)
+	frontmatter = buildObsidianFrontmatter(post)
+	if frontmatter == "" {
+		return body
+	}
+	if body == "" {
+		return frontmatter
+	}
+	return frontmatter + "\n\n" + body
 }
 
 func normalizeLineEndings(content string) string {
@@ -33,21 +60,128 @@ func normalizeLineEndings(content string) string {
 	return content
 }
 
-func splitFrontmatter(content string) (string, string) {
+func extractFrontmatter(content string) (string, string, bool) {
 	lines := strings.Split(content, "\n")
 	if len(lines) < 2 || lines[0] != "---" {
-		return "", content
+		return "", content, false
 	}
 	for i := 1; i < len(lines); i++ {
 		if lines[i] == "---" {
 			frontmatter := strings.Join(lines[:i+1], "\n")
 			if i+1 < len(lines) {
-				return frontmatter + "\n", strings.Join(lines[i+1:], "\n")
+				return frontmatter, strings.Join(lines[i+1:], "\n"), true
 			}
-			return frontmatter, ""
+			return frontmatter, "", true
 		}
 	}
-	return "", content
+	return "", content, false
+}
+
+func buildObsidianFrontmatter(post Post) string {
+	title := strings.TrimSpace(post.Title)
+	title = escapeYAMLString(title)
+	created := earliestPublicationDate(post)
+	tags := collectPostTags(post)
+
+	var parts []string
+	parts = append(parts, "---")
+	parts = append(parts, fmt.Sprintf("title: \"%s\"", title))
+	parts = append(parts, "tags: "+formatYAMLList(tags))
+	if created != "" {
+		parts = append(parts, "created: "+created)
+	}
+	parts = append(parts, "---")
+	return strings.Join(parts, "\n")
+}
+
+func escapeYAMLString(value string) string {
+	value = strings.ReplaceAll(value, "\\", "\\\\")
+	value = strings.ReplaceAll(value, "\"", "\\\"")
+	return value
+}
+
+func collectPostTags(post Post) []string {
+	values := make([]string, 0)
+	seen := make(map[string]struct{})
+	addTag := func(value string) {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			return
+		}
+		key := strings.ToLower(value)
+		if _, ok := seen[key]; ok {
+			return
+		}
+		seen[key] = struct{}{}
+		values = append(values, value)
+	}
+
+	for _, tag := range post.Tags {
+		if tag.Name != "" {
+			addTag(tag.Name)
+			continue
+		}
+		addTag(tag.Slug)
+	}
+	for _, tag := range post.Categories {
+		if tag.Name != "" {
+			addTag(tag.Name)
+			continue
+		}
+		addTag(tag.Slug)
+	}
+
+	return values
+}
+
+func formatYAMLList(values []string) string {
+	if len(values) == 0 {
+		return "[]"
+	}
+	quoted := make([]string, 0, len(values))
+	for _, value := range values {
+		quoted = append(quoted, "\""+escapeYAMLString(value)+"\"")
+	}
+	return "[" + strings.Join(quoted, ", ") + "]"
+}
+
+func earliestPublicationDate(post Post) string {
+	candidates := []string{
+		post.FirstPublishedAt,
+		post.PostDate,
+		post.PublishedAt,
+	}
+	var earliest time.Time
+	found := false
+	for _, candidate := range candidates {
+		if parsed, ok := parseSubstackDate(candidate); ok {
+			if !found || parsed.Before(earliest) {
+				earliest = parsed
+				found = true
+			}
+		}
+	}
+	if !found {
+		return ""
+	}
+	return earliest.UTC().Format("2006-01-02")
+}
+
+func parseSubstackDate(value string) (time.Time, bool) {
+	if value == "" {
+		return time.Time{}, false
+	}
+	layouts := []string{
+		time.RFC3339,
+		time.RFC3339Nano,
+		"2006-01-02",
+	}
+	for _, layout := range layouts {
+		if parsed, err := time.Parse(layout, value); err == nil {
+			return parsed, true
+		}
+	}
+	return time.Time{}, false
 }
 
 func transformOutsideCodeFences(content string) string {

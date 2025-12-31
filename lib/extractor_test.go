@@ -330,6 +330,63 @@ func TestObsidianMarkdownTransforms(t *testing.T) {
 	})
 }
 
+func TestObsidianFrontmatter(t *testing.T) {
+	t.Run("created from publish date", func(t *testing.T) {
+		post := createSamplePost()
+		post.PostDate = "2023-02-01T10:00:00Z"
+		post.PublishedAt = ""
+		post.FirstPublishedAt = ""
+
+		output, err := post.ToObsidianMD(true)
+		require.NoError(t, err)
+		assert.Contains(t, output, "created: 2023-02-01")
+		assert.True(t, strings.HasPrefix(output, "---\n"))
+	})
+
+	t.Run("earliest publication date wins", func(t *testing.T) {
+		post := createSamplePost()
+		post.PostDate = "2023-05-01T10:00:00Z"
+		post.PublishedAt = "2023-04-01"
+		post.FirstPublishedAt = "2023-03-01T09:00:00Z"
+
+		output, err := post.ToObsidianMD(false)
+		require.NoError(t, err)
+		assert.Contains(t, output, "created: 2023-03-01")
+	})
+
+	t.Run("created omitted when missing", func(t *testing.T) {
+		post := createSamplePost()
+		post.PostDate = ""
+		post.PublishedAt = ""
+		post.FirstPublishedAt = ""
+
+		output, err := post.ToObsidianMD(false)
+		require.NoError(t, err)
+		assert.NotContains(t, output, "created:")
+		assert.Contains(t, output, "tags: []")
+	})
+
+	t.Run("existing frontmatter preserved", func(t *testing.T) {
+		post := createSamplePost()
+		post.Title = "New Title"
+		post.PostDate = "2024-01-01"
+		input := "---\ntitle: Old Title\ncreated: 2000-01-01\n---\nSee [Note](OtherNote.md)\n"
+
+		output := renderObsidianMarkdown(input, post)
+		assert.Contains(t, output, "title: Old Title")
+		assert.Contains(t, output, "created: 2000-01-01")
+		assert.NotContains(t, output, "title: \"New Title\"")
+		assert.Contains(t, output, "See [[OtherNote|Note]]")
+	})
+
+	t.Run("non-obsidian formats unchanged", func(t *testing.T) {
+		post := createSamplePost()
+		mdContent, err := post.ToMD(true)
+		require.NoError(t, err)
+		assert.False(t, strings.HasPrefix(mdContent, "---\n"))
+	})
+}
+
 // Test extractJSONString function
 func TestExtractJSONString(t *testing.T) {
 	t.Run("validHTML", func(t *testing.T) {

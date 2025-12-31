@@ -120,6 +120,8 @@ Global Flags:
 - `obsidian-md`: Markdown optimized for Obsidian (wikilinks/embeds, LF line endings).
 - `txt`: Plain text.
 
+For `obsidian-md`, YAML frontmatter is derived only from Substack metadata (title, tags, and the earliest publication date). The current/system date is never used.
+
 Example (obsidian-md conversion):
 
 Before (md):
