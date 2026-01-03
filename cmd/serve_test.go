@@ -40,8 +40,8 @@ func TestServeUIRoot(t *testing.T) {
 	if !strings.Contains(rec.Body.String(), "Substack Downloader Wizard") {
 		t.Fatalf("expected UI content in response")
 	}
-	if !strings.Contains(rec.Body.String(), "Recommended defaults") {
-		t.Fatalf("expected recommended defaults hint in response")
+	if !strings.Contains(rec.Body.String(), "Choose a starting preset") {
+		t.Fatalf("expected preset chooser hint in response")
 	}
 	if !strings.Contains(rec.Body.String(), "data-error-for=\"url\"") {
 		t.Fatalf("expected validation markers in response")

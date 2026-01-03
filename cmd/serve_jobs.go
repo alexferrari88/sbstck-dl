@@ -312,7 +312,7 @@ func (m *jobManager) runJob(ctx context.Context, job *downloadJob, req jobStartR
 		m.applyEvent(job.ID, ev)
 	}
 
-	_, err := runDownload(ctx, observer, false)
+	_, err := runDownloadAllFormats(ctx, observer, false)
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
 			m.finishJob(job.ID, jobCanceled, nil)

@@ -41,7 +41,7 @@ var (
 		Short: "Download individual posts or the entire public archive",
 		Long:  `You can provide the url of a single post or the main url of the Substack you want to download.`,
 		Run: func(cmd *cobra.Command, args []string) {
-			if _, err := runDownload(ctx, nil, true); err != nil {
+			if _, err := runDownloadAllFormats(ctx, nil, true); err != nil {
 				log.Fatalln(err)
 			}
 		},
@@ -50,7 +50,7 @@ var (
 
 func init() {
 	downloadCmd.Flags().StringVarP(&downloadUrl, "url", "u", "", "Specify the Substack url")
-	downloadCmd.Flags().StringVarP(&format, "format", "f", "html", "Specify the output format (options: \"html\", \"md\", \"obsidian-md\", \"txt\"")
+	downloadCmd.Flags().StringVarP(&format, "format", "f", defaultDownloadFormat, "Specify the output format (options: \"html\", \"md\", \"obsidian-md\", \"txt\", or \"html+md\" (HTML + Obsidian Markdown))")
 	downloadCmd.Flags().StringVarP(&outputFolder, "output", "o", ".", "Specify the download directory (default: publication name when empty or \".\")")
 	downloadCmd.Flags().BoolVarP(&dryRun, "dry-run", "d", false, "Enable dry run")
 	downloadCmd.Flags().BoolVar(&addSourceURL, "add-source-url", false, "Add the original post URL at the end of the downloaded file")
@@ -265,16 +265,14 @@ func filterEntriesForDownload(entries []lib.SitemapEntry, outputFolder string, f
 	for _, entry := range entries {
 		if manifest != nil {
 			if manifestEntry, ok := manifest.Entries[entry.URL]; ok {
-				if manifestEntry.Format == "" || manifestEntry.Format == format {
-					if manifestEntryExists(manifestEntry, outputFolder) {
-						if refreshUpdated && isEntryUpdated(manifestEntry, entry.LastMod) {
-							filtered = append(filtered, entry)
-							refreshed++
-							continue
-						}
-						skipped++
+				if manifestEntryMatchesFormat(manifestEntry, format) && manifestEntryExists(manifestEntry, outputFolder) {
+					if refreshUpdated && isEntryUpdated(manifestEntry, entry.LastMod) {
+						filtered = append(filtered, entry)
+						refreshed++
 						continue
 					}
+					skipped++
+					continue
 				}
 			}
 		}
@@ -302,6 +300,21 @@ func manifestEntryExists(entry lib.ManifestEntry, outputFolder string) bool {
 		return true
 	}
 	return false
+}
+
+func manifestEntryMatchesFormat(entry lib.ManifestEntry, format string) bool {
+	if entry.Format == "" {
+		return manifestPathMatchesFormat(entry.FilePath, format)
+	}
+	return entry.Format == format
+}
+
+func manifestPathMatchesFormat(path string, format string) bool {
+	if path == "" {
+		return false
+	}
+	ext := "." + outputFormatExtension(format)
+	return strings.HasSuffix(strings.ToLower(path), strings.ToLower(ext))
 }
 
 func isEntryUpdated(entry lib.ManifestEntry, lastMod string) bool {
@@ -407,7 +420,7 @@ func filterExistingPosts(urls []string, outputFolder string, format string) ([]s
 	for _, url := range urls {
 		if manifest != nil {
 			if entry, ok := manifest.Entries[url]; ok {
-				if entry.Format == "" || entry.Format == format {
+				if manifestEntryMatchesFormat(entry, format) {
 					entryPath := filepath.FromSlash(entry.FilePath)
 					if entryPath != "" && !filepath.IsAbs(entryPath) {
 						entryPath = filepath.Join(outputFolder, entryPath)

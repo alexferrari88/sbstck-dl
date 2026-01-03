@@ -64,6 +64,7 @@ By providing the main URL of a Substack, the downloader will download all the po
 When downloading the full archive, if the downloader is interrupted, at the next execution it will resume the download of the remaining posts.
 A `manifest.json` file is written in the output directory with canonical URLs, local paths, download times, and content hashes.
 On reruns, URLs already recorded in the manifest (with matching format and existing file) are skipped.
+When using `html+md` (HTML + Obsidian Markdown), each format is checked independently so missing outputs are downloaded.
 If any posts fail to download, a `failed-urls.txt` file is written in the output directory for retrying later.
 If `--output` is omitted or set to `.`, files are written under a folder named after the publication.
 Use `--refresh-updated` to re-download posts when the sitemap `lastmod` is newer than the manifest.
@@ -84,7 +85,7 @@ Flags:
       --file-extensions string Comma-separated list of file extensions to download (e.g., 'pdf,docx,txt'). If empty, downloads all file types
       --files-dir string       Directory name for downloaded file attachments (default "files")
       --force                 Redownload posts even if they already exist
-  -f, --format string          Specify the output format (options: "html", "md", "obsidian-md", "txt" (default "html")
+  -f, --format string          Specify the output format (options: "html", "md", "obsidian-md", "txt", or "html+md") (default "html+md")
   -h, --help                   help for download
       --image-quality string   Image quality to download (options: "high", "medium", "low") (default "high")
       --images-dir string      Directory name for downloaded images (default "images")
@@ -116,10 +117,16 @@ Global Flags:
 
 #### Output formats
 
-- `html`: Default; preserves Substack formatting best.
-- `md`: Standard Markdown.
+- `html`: Preserves Substack formatting best.
+- `html+md`: Download HTML plus Obsidian Markdown in one run (each format skips existing files separately). This is the default.
+- `md`: Standard Markdown (no Obsidian-specific transformations).
 - `obsidian-md`: Markdown optimized for Obsidian (wikilinks/embeds, LF line endings).
 - `txt`: Plain text.
+
+Example (download HTML + Obsidian Markdown, only missing outputs):
+```bash
+sbstck-dl download --url https://example.substack.com --format html+md
+```
 
 For `obsidian-md`, YAML frontmatter is derived only from Substack metadata (title, tags, and the earliest publication date). The current/system date is never used.
 
@@ -409,7 +416,7 @@ Usage:
   sbstck-dl archive [flags]
 
 Flags:
-  -f, --format string   Specify the output format (options: "html", "md", "obsidian-md", "txt" (default "html")
+  -f, --format string   Specify the output format (options: "html", "md", "obsidian-md", "txt", or "html+md") (default "html+md")
   -h, --help            help for archive
   -o, --output string   Specify the download directory (default ".")
 

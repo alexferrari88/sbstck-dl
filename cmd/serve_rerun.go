@@ -70,9 +70,9 @@ func serveRerun(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	format := strings.ToLower(strings.TrimSpace(req.Format))
-	if format == "" {
-		format = "html"
+	formats, formatErr := parseFormats(req.Format)
+	if formatErr != nil {
+		errorsList = append(errorsList, formatErr.Error())
 	}
 
 	outputDir := strings.TrimSpace(req.Output)
@@ -102,8 +102,9 @@ func serveRerun(w http.ResponseWriter, r *http.Request) {
 		response.SitemapURL = buildSitemapURL(pubURL)
 	}
 
-	if pubURL == nil {
+	if pubURL == nil || formatErr != nil {
 		response.Errors = errorsList
+		response.OK = false
 		writeJSON(w, http.StatusOK, response)
 		return
 	}
@@ -150,11 +151,19 @@ func serveRerun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	filtered, _, _, err := filterEntriesForDownload(entries, outputDir, format, manifest, false)
-	if err != nil {
-		errorsList = append(errorsList, fmt.Sprintf("Failed to filter existing posts: %v", err))
+	newPosts := make(map[string]struct{})
+	for _, nextFormat := range formats {
+		filtered, _, _, err := filterEntriesForDownload(entries, outputDir, nextFormat, manifest, false)
+		if err != nil {
+			errorsList = append(errorsList, fmt.Sprintf("Failed to filter existing posts for %s: %v", nextFormat, err))
+		}
+		for _, entry := range filtered {
+			if entry.URL != "" {
+				newPosts[entry.URL] = struct{}{}
+			}
+		}
 	}
-	response.NewPosts = len(filtered)
+	response.NewPosts = len(newPosts)
 	response.Errors = errorsList
 	response.OK = len(errorsList) == 0
 	writeJSON(w, http.StatusOK, response)

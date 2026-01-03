@@ -809,13 +809,14 @@
               <input id="outputDirPicker" type="file" webkitdirectory hidden />
               <label class="field">
                 Format <span class="flag">--format</span>
-                <select id="format" data-flag="--format" data-default="html">
-                  <option value="html" selected>html</option>
+                <select id="format" data-flag="--format" data-default="html+md">
+                  <option value="html">html</option>
+                  <option value="html+md" selected>html+md</option>
                   <option value="md">md</option>
                   <option value="obsidian-md">obsidian-md</option>
                   <option value="txt">txt</option>
                 </select>
-                <span class="help">html = best fidelity; obsidian-md = Obsidian-friendly.</span>
+                <span class="help">html = best fidelity; html+md = HTML + Obsidian Markdown (default).</span>
               </label>
             </div>
           </div>

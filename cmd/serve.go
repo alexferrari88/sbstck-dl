@@ -269,9 +269,9 @@ func servePreview(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	format := strings.ToLower(strings.TrimSpace(req.Format))
-	if format == "" {
-		format = "html"
+	formats, formatErr := parseFormats(req.Format)
+	if formatErr != nil {
+		errorsList = append(errorsList, formatErr.Error())
 	}
 
 	pubURLString := ""
@@ -305,15 +305,16 @@ func servePreview(w http.ResponseWriter, r *http.Request) {
 	)
 	extractor := lib.NewExtractor(fetcher)
 
+	formatLabel := strings.Join(formats, "+")
 	response := previewResponse{
 		OutputDir: outputDir,
-		Format:    format,
+		Format:    formatLabel,
 	}
 	if pubURL != nil {
 		response.SitemapURL = buildSitemapURL(pubURL)
 	}
 
-	if pubURL == nil {
+	if pubURL == nil || formatErr != nil {
 		response.Errors = errorsList
 		response.OK = false
 		writePreviewResponse(w, response)
@@ -348,15 +349,23 @@ func servePreview(w http.ResponseWriter, r *http.Request) {
 			errorsList = append(errorsList, fmt.Sprintf("Failed to read manifest: %v", err))
 			manifest = lib.NewManifest()
 		}
-		filtered, skipped, refreshed, err := filterEntriesForDownload(entries, outputDir, format, manifest, req.RefreshUpdated)
-		if err != nil {
-			errorsList = append(errorsList, fmt.Sprintf("Failed to filter existing posts: %v", err))
+		totalToDownload := 0
+		totalSkipped := 0
+		totalRefreshed := 0
+		for _, nextFormat := range formats {
+			filtered, skipped, refreshed, err := filterEntriesForDownload(entries, outputDir, nextFormat, manifest, req.RefreshUpdated)
+			if err != nil {
+				errorsList = append(errorsList, fmt.Sprintf("Failed to filter existing posts for %s: %v", nextFormat, err))
+			}
+			totalToDownload += len(filtered)
+			totalSkipped += skipped
+			totalRefreshed += refreshed
 		}
-		response.ToDownload = len(filtered)
-		response.Skipped = skipped
-		response.Refreshed = refreshed
+		response.ToDownload = totalToDownload
+		response.Skipped = totalSkipped
+		response.Refreshed = totalRefreshed
 	} else {
-		response.ToDownload = len(entries)
+		response.ToDownload = len(entries) * len(formats)
 		response.Skipped = 0
 		response.Refreshed = 0
 	}
