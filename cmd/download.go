@@ -74,7 +74,16 @@ var (
 					if fileExtensions != "" {
 						fileExtensionsSlice = strings.Split(strings.ReplaceAll(fileExtensions, " ", ""), ",")
 					}
-					imageResult, err := post.WriteToFileWithImages(ctx, path, format, addSourceURL, downloadImages, imageQualityEnum, imagesDir, downloadFiles, fileExtensionsSlice, filesDir, fetcher)
+
+					// Hugo format uses static/images and static/files
+					actualImagesDir := imagesDir
+					actualFilesDir := filesDir
+					if format == "hugo" {
+						actualImagesDir = filepath.Join("static", imagesDir)
+						actualFilesDir = filepath.Join("static", filesDir)
+					}
+
+					imageResult, err := post.WriteToFileWithImages(ctx, path, format, addSourceURL, downloadImages, imageQualityEnum, actualImagesDir, downloadFiles, fileExtensionsSlice, actualFilesDir, fetcher)
 					if err != nil {
 						log.Printf("Error writing file %s: %v\n", path, err)
 					} else if verbose && imageResult.Success > 0 {
@@ -166,7 +175,16 @@ var (
 						if fileExtensions != "" {
 							fileExtensionsSlice = strings.Split(strings.ReplaceAll(fileExtensions, " ", ""), ",")
 						}
-						imageResult, err := post.WriteToFileWithImages(ctx, path, format, addSourceURL, downloadImages, imageQualityEnum, imagesDir, downloadFiles, fileExtensionsSlice, filesDir, fetcher)
+
+						// Hugo format uses static/images and static/files
+						actualImagesDir := imagesDir
+						actualFilesDir := filesDir
+						if format == "hugo" {
+							actualImagesDir = filepath.Join("static", imagesDir)
+							actualFilesDir = filepath.Join("static", filesDir)
+						}
+
+						imageResult, err := post.WriteToFileWithImages(ctx, path, format, addSourceURL, downloadImages, imageQualityEnum, actualImagesDir, downloadFiles, fileExtensionsSlice, actualFilesDir, fetcher)
 						if err != nil {
 							log.Printf("Error writing file %s: %v\n", path, err)
 						} else if verbose && imageResult.Success > 0 {
@@ -195,19 +213,21 @@ var (
 				if verbose {
 					fmt.Printf("Generating archive page in %s format...\n", format)
 				}
-				
+
 				var archiveErr error
 				switch format {
 				case "html":
 					archiveErr = archive.GenerateHTML(outputFolder)
 				case "md":
 					archiveErr = archive.GenerateMarkdown(outputFolder)
+				case "hugo":
+					archiveErr = archive.GenerateHugo(outputFolder)
 				case "txt":
 					archiveErr = archive.GenerateText(outputFolder)
 				default:
 					archiveErr = fmt.Errorf("unknown format for archive: %s", format)
 				}
-				
+
 				if archiveErr != nil {
 					log.Printf("Error generating archive page: %v\n", archiveErr)
 				} else if verbose {
@@ -220,7 +240,7 @@ var (
 
 func init() {
 	downloadCmd.Flags().StringVarP(&downloadUrl, "url", "u", "", "Specify the Substack url")
-	downloadCmd.Flags().StringVarP(&format, "format", "f", "html", "Specify the output format (options: \"html\", \"md\", \"txt\"")
+	downloadCmd.Flags().StringVarP(&format, "format", "f", "html", "Specify the output format (options: \"html\", \"md\", \"hugo\", \"txt\"")
 	downloadCmd.Flags().StringVarP(&outputFolder, "output", "o", ".", "Specify the download directory")
 	downloadCmd.Flags().BoolVarP(&dryRun, "dry-run", "d", false, "Enable dry run")
 	downloadCmd.Flags().BoolVar(&addSourceURL, "add-source-url", false, "Add the original post URL at the end of the downloaded file")
@@ -264,8 +284,23 @@ func parseURL(toTest string) (*url.URL, error) {
 	return u, err
 }
 
+// getFileExtension returns the file extension for a given format
+func getFileExtension(format string) string {
+	if format == "hugo" {
+		return "md"
+	}
+	return format
+}
+
 func makePath(post lib.Post, outputFolder string, format string) string {
-	return fmt.Sprintf("%s/%s_%s.%s", outputFolder, convertDateTime(post.PostDate), post.Slug, format)
+	ext := getFileExtension(format)
+
+	// Hugo format uses content/posts directory structure
+	if format == "hugo" {
+		return filepath.Join(outputFolder, "content", "posts", fmt.Sprintf("%s_%s.%s", convertDateTime(post.PostDate), post.Slug, ext))
+	}
+
+	return fmt.Sprintf("%s/%s_%s.%s", outputFolder, convertDateTime(post.PostDate), post.Slug, ext)
 }
 
 // extractSlug extracts the slug from a Substack post URL
@@ -278,10 +313,19 @@ func extractSlug(url string) string {
 // filterExistingPosts filters out posts that already exist in the output folder.
 // It looks for files whose name ends with the post slug.
 func filterExistingPosts(urls []string, outputFolder string, format string) ([]string, error) {
+	ext := getFileExtension(format)
 	var filtered []string
 	for _, url := range urls {
 		slug := extractSlug(url)
-		path := fmt.Sprintf("%s/%s_%s.%s", outputFolder, "*", slug, format)
+
+		var path string
+		// Hugo format uses content/posts directory structure
+		if format == "hugo" {
+			path = filepath.Join(outputFolder, "content", "posts", fmt.Sprintf("*_%s.%s", slug, ext))
+		} else {
+			path = fmt.Sprintf("%s/%s_%s.%s", outputFolder, "*", slug, ext)
+		}
+
 		matches, err := filepath.Glob(path)
 		if err != nil {
 			return urls, err
