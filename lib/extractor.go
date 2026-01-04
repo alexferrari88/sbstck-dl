@@ -16,6 +16,7 @@ import (
 	md "github.com/JohannesKaufmann/html-to-markdown"
 	"github.com/PuerkitoBio/goquery"
 	"github.com/k3a/html2text"
+	"gopkg.in/yaml.v3"
 )
 
 // RawPost represents a raw Substack post in string format.
@@ -67,6 +68,41 @@ func (p *Post) ToMD(withTitle bool) (string, error) {
 	return mdConverter.ConvertString(p.BodyHTML)
 }
 
+// HugoFrontMatter represents Hugo front matter with YAML attributes
+type HugoFrontMatter struct {
+	Title        string `yaml:"title"`
+	Subtitle     string `yaml:"subtitle,omitempty"`
+	Description  string `yaml:"description"`
+	Date         string `yaml:"date"`
+	CanonicalUrl string `yaml:"canonical_url,omitempty"`
+}
+
+func writeHugo(p *Post, body string) (string, error) {
+	fm := HugoFrontMatter{
+		Title:        p.Title,
+		Subtitle:     p.Subtitle,
+		Description:  p.Description,
+		Date:         p.PostDate,
+		CanonicalUrl: p.CanonicalUrl,
+	}
+	data, err := yaml.Marshal(fm)
+	if err != nil {
+		return "", err
+	}
+
+	// Hugo front matter is wrapped with --- delimiters
+	return fmt.Sprintf("---\n%s---\n%s", string(data), body), nil
+}
+
+// ToHugo converts the Post's HTML body to Hugo format with YAML front matter.
+func (p *Post) ToHugo(withTitle bool) (string, error) {
+	body, err := mdConverter.ConvertString(p.BodyHTML)
+	if err != nil {
+		return "", err
+	}
+	return writeHugo(p, body)
+}
+
 // ToText converts the Post's HTML body to plain text format.
 func (p *Post) ToText(withTitle bool) string {
 	if withTitle {
@@ -99,6 +135,8 @@ func (p *Post) contentForFormat(format string, withTitle bool) (string, error) {
 		return p.ToHTML(withTitle), nil
 	case "md":
 		return p.ToMD(withTitle)
+	case "hugo":
+		return p.ToHugo(withTitle)
 	case "txt":
 		return p.ToText(withTitle), nil
 	default:
@@ -131,10 +169,10 @@ func (p *Post) WriteToFile(path string, format string, addSourceURL bool) error 
 }
 
 // WriteToFileWithImages writes the Post's content to a file with optional image downloading
-func (p *Post) WriteToFileWithImages(ctx context.Context, path string, format string, addSourceURL bool, 
-	downloadImages bool, imageQuality ImageQuality, imagesDir string, 
+func (p *Post) WriteToFileWithImages(ctx context.Context, path string, format string, addSourceURL bool,
+	downloadImages bool, imageQuality ImageQuality, imagesDir string,
 	downloadFiles bool, fileExtensions []string, filesDir string, fetcher *Fetcher) (*ImageDownloadResult, error) {
-	
+
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return nil, err
 	}
@@ -147,17 +185,23 @@ func (p *Post) WriteToFileWithImages(ctx context.Context, path string, format st
 	var imageResult *ImageDownloadResult
 
 	// Download images if requested and format supports it
-	if downloadImages && (format == "html" || format == "md") {
+	if downloadImages && (format == "html" || format == "md" || format == "hugo") {
+		// For Hugo, images should be at the root output directory, not relative to the post file
 		outputDir := filepath.Dir(path)
+		if format == "hugo" {
+			// Hugo posts are in {outputFolder}/content/posts/{file}.md
+			// We need to go up to {outputFolder} for images in static/images
+			outputDir = filepath.Join(filepath.Dir(path), "..", "..")
+		}
 		imageDownloader := NewImageDownloader(fetcher, outputDir, imagesDir, imageQuality)
-		
+
 		// Only process HTML content for image downloading
 		htmlContent := content
-		if format == "md" {
-			// For markdown, we need to work with the original HTML
+		if format == "md" || format == "hugo" {
+			// For markdown and hugo, we need to work with the original HTML
 			htmlContent = p.BodyHTML
 		}
-		
+
 		imageResult, err = imageDownloader.DownloadImages(ctx, htmlContent, p.Slug)
 		if err != nil {
 			return nil, fmt.Errorf("failed to download images: %w", err)
@@ -179,12 +223,28 @@ func (p *Post) WriteToFileWithImages(ctx context.Context, path string, format st
 				return nil, fmt.Errorf("failed to convert updated HTML to markdown: %w", err)
 			}
 			content = fmt.Sprintf("# %s\n\n%s", p.Title, updatedContent)
+		} else if format == "hugo" {
+			// Convert updated HTML to markdown with Hugo front matter
+			updatedContent, err := mdConverter.ConvertString(imageResult.UpdatedHTML)
+			if err != nil {
+				return nil, fmt.Errorf("failed to convert updated HTML to Hugo format: %w", err)
+			}
+
+			// For Hugo, convert static/images paths to /images paths (Hugo convention)
+			// Images are stored in static/images but referenced as /images in content
+			updatedContent = strings.ReplaceAll(updatedContent, "static/images/", "/images/")
+			updatedContent = strings.ReplaceAll(updatedContent, "static/files/", "/files/")
+
+			content, err = writeHugo(p, updatedContent)
+			if err != nil {
+				return nil, fmt.Errorf("failed to write Hugo content: %w", err)
+			}
 		}
 	} else if downloadImages && format == "txt" {
 		// For text format, we can't embed images, but we can still download them
 		outputDir := filepath.Dir(path)
 		imageDownloader := NewImageDownloader(fetcher, outputDir, imagesDir, imageQuality)
-		
+
 		imageResult, err = imageDownloader.DownloadImages(ctx, p.BodyHTML, p.Slug)
 		if err != nil {
 			return nil, fmt.Errorf("failed to download images: %w", err)
@@ -193,19 +253,25 @@ func (p *Post) WriteToFileWithImages(ctx context.Context, path string, format st
 	}
 
 	// Download files if requested and format supports it
-	if downloadFiles && (format == "html" || format == "md") {
+	if downloadFiles && (format == "html" || format == "md" || format == "hugo") {
+		// For Hugo, files should be at the root output directory, not relative to the post file
 		outputDir := filepath.Dir(path)
+		if format == "hugo" {
+			// Hugo posts are in {outputFolder}/content/posts/{file}.md
+			// We need to go up to {outputFolder} for files in static/files
+			outputDir = filepath.Join(filepath.Dir(path), "..", "..")
+		}
 		fileDownloader := NewFileDownloader(fetcher, outputDir, filesDir, fileExtensions)
-		
+
 		// Process HTML content for file downloading - use the updated HTML from images if available
 		htmlContent := content
 		if imageResult != nil && imageResult.UpdatedHTML != "" {
 			htmlContent = imageResult.UpdatedHTML
-		} else if format == "md" {
-			// For markdown, we need to work with the original HTML
+		} else if format == "md" || format == "hugo" {
+			// For markdown and hugo, we need to work with the original HTML
 			htmlContent = p.BodyHTML
 		}
-		
+
 		fileResult, err := fileDownloader.DownloadFiles(ctx, htmlContent, p.Slug)
 		if err != nil {
 			return nil, fmt.Errorf("failed to download files: %w", err)
@@ -226,6 +292,21 @@ func (p *Post) WriteToFileWithImages(ctx context.Context, path string, format st
 					return nil, fmt.Errorf("failed to convert updated HTML to markdown: %w", err)
 				}
 				content = fmt.Sprintf("# %s\n\n%s", p.Title, updatedContent)
+			} else if format == "hugo" {
+				// Convert updated HTML to markdown with Hugo front matter
+				updatedContent, err := mdConverter.ConvertString(fileResult.UpdatedHTML)
+				if err != nil {
+					return nil, fmt.Errorf("failed to convert updated HTML to markdown: %w", err)
+				}
+
+				// For Hugo, convert static/images and static/files paths to /images and /files paths (Hugo convention)
+				updatedContent = strings.ReplaceAll(updatedContent, "static/images/", "/images/")
+				updatedContent = strings.ReplaceAll(updatedContent, "static/files/", "/files/")
+
+				content, err = writeHugo(p, updatedContent)
+				if err != nil {
+					return nil, fmt.Errorf("failed to write Hugo content: %w", err)
+				}
 			}
 		}
 	}
@@ -368,6 +449,20 @@ func (e *Extractor) ExtractPost(ctx context.Context, pageUrl string) (Post, erro
 		}
 	}
 
+	// Extract CanonicalUrl from link[rel='canonical'] if not already set
+	if p.CanonicalUrl == "" {
+		if canonicalUrl, exists := doc.Find("link[rel='canonical']").Attr("href"); exists && canonicalUrl != "" {
+			p.CanonicalUrl = canonicalUrl
+		}
+	}
+
+	// Extract CanonicalUrl from og:url meta tag if not already set
+	if p.CanonicalUrl == "" {
+		if canonicalUrl, exists := doc.Find("meta[property='og:url']").Attr("content"); exists && canonicalUrl != "" {
+			p.CanonicalUrl = canonicalUrl
+		}
+	}
+
 	return p, nil
 }
 
@@ -501,7 +596,7 @@ func (a *Archive) AddEntry(post Post, filePath string, downloadTime time.Time) {
 		FilePath:     filePath,
 		DownloadTime: downloadTime,
 	}
-	
+
 	a.Entries = append(a.Entries, entry)
 	a.sortEntries()
 }
@@ -512,12 +607,12 @@ func (a *Archive) sortEntries() {
 		// Parse post dates and compare (newest first)
 		dateI, errI := time.Parse(time.RFC3339, a.Entries[i].Post.PostDate)
 		dateJ, errJ := time.Parse(time.RFC3339, a.Entries[j].Post.PostDate)
-		
+
 		if errI != nil || errJ != nil {
 			// If parsing fails, sort by title
 			return a.Entries[i].Post.Title < a.Entries[j].Post.Title
 		}
-		
+
 		return dateI.After(dateJ) // newest first
 	})
 }
@@ -525,7 +620,7 @@ func (a *Archive) sortEntries() {
 // GenerateHTML creates an HTML archive page
 func (a *Archive) GenerateHTML(outputDir string) error {
 	archivePath := filepath.Join(outputDir, "index.html")
-	
+
 	html := `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -551,29 +646,29 @@ func (a *Archive) GenerateHTML(outputDir string) error {
 	for _, entry := range a.Entries {
 		// Make file path relative from archive directory
 		relPath, _ := filepath.Rel(outputDir, entry.FilePath)
-		
+
 		// Format publication date
 		pubDate := entry.Post.PostDate
 		if parsedDate, err := time.Parse(time.RFC3339, entry.Post.PostDate); err == nil {
 			pubDate = parsedDate.Format("January 2, 2006")
 		}
-		
+
 		// Format download date
 		downloadDate := entry.DownloadTime.Format("January 2, 2006 15:04")
-		
+
 		html += `	<div class="post">
 `
-		
+
 		// Add cover image if available
 		if entry.Post.CoverImage != "" {
 			html += fmt.Sprintf(`		<img src="%s" alt="Cover" class="cover-image">
 `, entry.Post.CoverImage)
 		}
-		
+
 		html += fmt.Sprintf(`		<h2><a href="%s">%s</a></h2>
 		<div class="meta">Published: %s | Downloaded: %s</div>
 `, relPath, entry.Post.Title, pubDate, downloadDate)
-		
+
 		// Add subtitle/description
 		description := entry.Post.Subtitle
 		if description == "" {
@@ -583,44 +678,44 @@ func (a *Archive) GenerateHTML(outputDir string) error {
 			html += fmt.Sprintf(`		<div class="subtitle">%s</div>
 `, description)
 		}
-		
+
 		html += `	</div>
 `
 	}
-	
+
 	html += `</body>
 </html>`
-	
+
 	return os.WriteFile(archivePath, []byte(html), 0644)
 }
 
 // GenerateMarkdown creates a Markdown archive page
 func (a *Archive) GenerateMarkdown(outputDir string) error {
 	archivePath := filepath.Join(outputDir, "index.md")
-	
+
 	content := "# Substack Archive\n\n"
-	
+
 	for _, entry := range a.Entries {
 		// Make file path relative from archive directory
 		relPath, _ := filepath.Rel(outputDir, entry.FilePath)
-		
+
 		// Format publication date
 		pubDate := entry.Post.PostDate
 		if parsedDate, err := time.Parse(time.RFC3339, entry.Post.PostDate); err == nil {
 			pubDate = parsedDate.Format("January 2, 2006")
 		}
-		
+
 		// Format download date
 		downloadDate := entry.DownloadTime.Format("January 2, 2006 15:04")
-		
+
 		content += fmt.Sprintf("## [%s](%s)\n\n", entry.Post.Title, relPath)
 		content += fmt.Sprintf("**Published:** %s | **Downloaded:** %s\n\n", pubDate, downloadDate)
-		
+
 		// Add cover image if available
 		if entry.Post.CoverImage != "" {
 			content += fmt.Sprintf("![Cover Image](%s)\n\n", entry.Post.CoverImage)
 		}
-		
+
 		// Add subtitle/description
 		description := entry.Post.Subtitle
 		if description == "" {
@@ -629,37 +724,89 @@ func (a *Archive) GenerateMarkdown(outputDir string) error {
 		if description != "" {
 			content += fmt.Sprintf("*%s*\n\n", description)
 		}
-		
+
 		content += "---\n\n"
 	}
-	
+
+	return os.WriteFile(archivePath, []byte(content), 0644)
+}
+
+// GenerateHugo creates a Hugo-format archive page with front matter
+func (a *Archive) GenerateHugo(outputDir string) error {
+	archivePath := filepath.Join(outputDir, "content", "_index.md")
+
+	// Ensure content directory exists
+	if err := os.MkdirAll(filepath.Dir(archivePath), 0755); err != nil {
+		return err
+	}
+
+	// Add Hugo front matter for the archive page
+	content := "---\ntitle: \"Substack Archive\"\ndate: " + time.Now().Format(time.RFC3339) + "\n---\n\n"
+	content += "# Substack Archive\n\n"
+
+	for _, entry := range a.Entries {
+		// Make file path relative from content directory (where the _index.md is)
+		contentDir := filepath.Join(outputDir, "content")
+		relPath, _ := filepath.Rel(contentDir, entry.FilePath)
+		// Always ensure forward slashes for Hugo (web standard)
+		relPath = strings.ReplaceAll(relPath, "\\", "/")
+
+		// Format publication date
+		pubDate := entry.Post.PostDate
+		if parsedDate, err := time.Parse(time.RFC3339, entry.Post.PostDate); err == nil {
+			pubDate = parsedDate.Format("January 2, 2006")
+		}
+
+		// Format download date
+		downloadDate := entry.DownloadTime.Format("January 2, 2006 15:04")
+
+		content += fmt.Sprintf("## [%s](%s)\n\n", entry.Post.Title, relPath)
+		content += fmt.Sprintf("**Published:** %s | **Downloaded:** %s\n\n", pubDate, downloadDate)
+
+		// Add cover image if available
+		if entry.Post.CoverImage != "" {
+			content += fmt.Sprintf("![Cover Image](%s)\n\n", entry.Post.CoverImage)
+		}
+
+		// Add subtitle/description
+		description := entry.Post.Subtitle
+		if description == "" {
+			description = entry.Post.Description
+		}
+		if description != "" {
+			content += fmt.Sprintf("*%s*\n\n", description)
+		}
+
+		content += "---\n\n"
+	}
+
 	return os.WriteFile(archivePath, []byte(content), 0644)
 }
 
 // GenerateText creates a plain text archive page
 func (a *Archive) GenerateText(outputDir string) error {
 	archivePath := filepath.Join(outputDir, "index.txt")
-	
+
 	content := "SUBSTACK ARCHIVE\n================\n\n"
-	
+
 	for _, entry := range a.Entries {
 		// Make file path relative from archive directory
 		relPath, _ := filepath.Rel(outputDir, entry.FilePath)
-		
+
 		// Format publication date
 		pubDate := entry.Post.PostDate
 		if parsedDate, err := time.Parse(time.RFC3339, entry.Post.PostDate); err == nil {
 			pubDate = parsedDate.Format("January 2, 2006")
 		}
-		
+
 		// Format download date
 		downloadDate := entry.DownloadTime.Format("January 2, 2006 15:04")
-		
+
 		content += fmt.Sprintf("Title: %s\n", entry.Post.Title)
 		content += fmt.Sprintf("File: %s\n", relPath)
 		content += fmt.Sprintf("Published: %s\n", pubDate)
 		content += fmt.Sprintf("Downloaded: %s\n", downloadDate)
-		
+
 		// Add subtitle/description
 		description := entry.Post.Subtitle
 		if description == "" {
@@ -668,9 +815,9 @@ func (a *Archive) GenerateText(outputDir string) error {
 		if description != "" {
 			content += fmt.Sprintf("Description: %s\n", description)
 		}
-		
+
 		content += "\n" + strings.Repeat("-", 50) + "\n\n"
 	}
-	
+
 	return os.WriteFile(archivePath, []byte(content), 0644)
 }
