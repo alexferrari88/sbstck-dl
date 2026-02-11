@@ -33,11 +33,21 @@ var (
 		Long:  `You can provide the url of a single post or the main url of the Substack you want to download.`,
 		Run: func(cmd *cobra.Command, args []string) {
 			startTime := time.Now()
-			
+
 			// Create archive instance if flag is set
 			var archive *lib.Archive
 			if createArchive {
-				archive = lib.NewArchive()
+				// Scan existing posts first to include them in the archive
+				var err error
+				archive, err = lib.ScanExistingPosts(outputFolder, format)
+				if err != nil {
+					if verbose {
+						fmt.Printf("Warning: could not scan existing posts: %v\n", err)
+					}
+					archive = lib.NewArchive()
+				} else if verbose && len(archive.Entries) > 0 {
+					fmt.Printf("Found %d existing posts to include in archive\n", len(archive.Entries))
+				}
 			}
 
 			// if url contains "/p/", we are downloading a single post
@@ -87,8 +97,12 @@ var (
 					}
 				}
 
-				// Add to archive if enabled
+				// Add to archive if enabled (update existing entry if post was re-downloaded)
 				if archive != nil {
+					if archive.HasEntry(post.Slug) {
+						// Remove existing entry before adding updated one
+						archive.RemoveEntry(post.Slug)
+					}
 					archive.AddEntry(post, path, startTime)
 				}
 
@@ -181,6 +195,10 @@ var (
 
 					// Add to archive if enabled and post was successfully written
 					if archive != nil {
+						if archive.HasEntry(post.Slug) {
+							// Remove existing entry before adding updated one
+							archive.RemoveEntry(post.Slug)
+						}
 						archive.AddEntry(post, path, time.Now())
 					}
 				}

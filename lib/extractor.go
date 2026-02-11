@@ -639,27 +639,27 @@ func (a *Archive) GenerateMarkdown(outputDir string) error {
 // GenerateText creates a plain text archive page
 func (a *Archive) GenerateText(outputDir string) error {
 	archivePath := filepath.Join(outputDir, "index.txt")
-	
+
 	content := "SUBSTACK ARCHIVE\n================\n\n"
-	
+
 	for _, entry := range a.Entries {
 		// Make file path relative from archive directory
 		relPath, _ := filepath.Rel(outputDir, entry.FilePath)
-		
+
 		// Format publication date
 		pubDate := entry.Post.PostDate
 		if parsedDate, err := time.Parse(time.RFC3339, entry.Post.PostDate); err == nil {
 			pubDate = parsedDate.Format("January 2, 2006")
 		}
-		
+
 		// Format download date
 		downloadDate := entry.DownloadTime.Format("January 2, 2006 15:04")
-		
+
 		content += fmt.Sprintf("Title: %s\n", entry.Post.Title)
 		content += fmt.Sprintf("File: %s\n", relPath)
 		content += fmt.Sprintf("Published: %s\n", pubDate)
 		content += fmt.Sprintf("Downloaded: %s\n", downloadDate)
-		
+
 		// Add subtitle/description
 		description := entry.Post.Subtitle
 		if description == "" {
@@ -668,9 +668,220 @@ func (a *Archive) GenerateText(outputDir string) error {
 		if description != "" {
 			content += fmt.Sprintf("Description: %s\n", description)
 		}
-		
+
 		content += "\n" + strings.Repeat("-", 50) + "\n\n"
 	}
-	
+
 	return os.WriteFile(archivePath, []byte(content), 0644)
+}
+
+// HasEntry checks if an entry with the given slug already exists in the archive
+func (a *Archive) HasEntry(slug string) bool {
+	for _, entry := range a.Entries {
+		if entry.Post.Slug == slug {
+			return true
+		}
+	}
+	return false
+}
+
+// RemoveEntry removes an entry with the given slug from the archive
+func (a *Archive) RemoveEntry(slug string) {
+	for i, entry := range a.Entries {
+		if entry.Post.Slug == slug {
+			a.Entries = append(a.Entries[:i], a.Entries[i+1:]...)
+			return
+		}
+	}
+}
+
+// ScanExistingPosts scans the output directory for existing post files and creates archive entries
+// It parses filenames in the format YYYYMMDD_HHMMSS_{slug}.{format}
+func ScanExistingPosts(outputDir string, format string) (*Archive, error) {
+	archive := NewArchive()
+
+	// Pattern to match post files
+	pattern := filepath.Join(outputDir, fmt.Sprintf("*_*.%s", format))
+	matches, err := filepath.Glob(pattern)
+	if err != nil {
+		return archive, fmt.Errorf("failed to scan directory: %w", err)
+	}
+
+	for _, filePath := range matches {
+		// Skip index files
+		base := filepath.Base(filePath)
+		if base == "index."+format {
+			continue
+		}
+
+		// Parse filename to extract date and slug
+		// Format: YYYYMMDD_HHMMSS_{slug}.{format}
+		entry, err := parsePostFile(filePath, format)
+		if err != nil {
+			// Skip files that don't match the expected format
+			continue
+		}
+
+		archive.Entries = append(archive.Entries, entry)
+	}
+
+	// Sort entries by publication date
+	archive.sortEntries()
+
+	return archive, nil
+}
+
+// parsePostFile parses a post file and extracts metadata to create an archive entry
+func parsePostFile(filePath string, format string) (ArchiveEntry, error) {
+	base := filepath.Base(filePath)
+	ext := "." + format
+
+	// Remove extension
+	name := strings.TrimSuffix(base, ext)
+
+	// Parse date and slug from filename
+	// Format: YYYYMMDD_HHMMSS_{slug}
+	parts := strings.SplitN(name, "_", 3)
+	if len(parts) < 3 {
+		return ArchiveEntry{}, fmt.Errorf("invalid filename format: %s", base)
+	}
+
+	dateStr := parts[0]
+	timeStr := parts[1]
+	slug := parts[2]
+
+	// Parse date from filename
+	postDate, err := time.Parse("20060102_150405", dateStr+"_"+timeStr)
+	if err != nil {
+		return ArchiveEntry{}, fmt.Errorf("failed to parse date from filename: %w", err)
+	}
+
+	// Read file content to extract metadata
+	content, err := os.ReadFile(filePath)
+	if err != nil {
+		return ArchiveEntry{}, fmt.Errorf("failed to read file: %w", err)
+	}
+
+	// Extract title, subtitle, and cover image from content
+	title, subtitle, coverImage := extractMetadataFromContent(string(content), format)
+
+	// Get file modification time as download time
+	fileInfo, err := os.Stat(filePath)
+	downloadTime := time.Now()
+	if err == nil {
+		downloadTime = fileInfo.ModTime()
+	}
+
+	entry := ArchiveEntry{
+		Post: Post{
+			Slug:       slug,
+			Title:      title,
+			Subtitle:   subtitle,
+			CoverImage: coverImage,
+			PostDate:   postDate.Format(time.RFC3339),
+		},
+		FilePath:     filePath,
+		DownloadTime: downloadTime,
+	}
+
+	return entry, nil
+}
+
+// extractMetadataFromContent extracts title, subtitle, and cover image from post content
+func extractMetadataFromContent(content string, format string) (title, subtitle, coverImage string) {
+	switch format {
+	case "html":
+		return extractMetadataFromHTML(content)
+	case "md":
+		return extractMetadataFromMarkdown(content)
+	case "txt":
+		return extractMetadataFromText(content)
+	}
+	return "", "", ""
+}
+
+// extractMetadataFromHTML extracts metadata from HTML content
+func extractMetadataFromHTML(content string) (title, subtitle, coverImage string) {
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(content))
+	if err != nil {
+		return "", "", ""
+	}
+
+	// Extract title from h1
+	title = strings.TrimSpace(doc.Find("h1").First().Text())
+
+	// Extract subtitle from .subtitle-container or first paragraph after title
+	subtitle = strings.TrimSpace(doc.Find(".subtitle-container").First().Text())
+	if subtitle == "" {
+		// Try to get first paragraph as subtitle
+		subtitle = strings.TrimSpace(doc.Find("h1").First().Next().Text())
+	}
+
+	// Extract cover image
+	doc.Find("img").Each(func(i int, s *goquery.Selection) {
+		if src, exists := s.Attr("src"); exists && coverImage == "" {
+			// Take first image as cover
+			coverImage = src
+		}
+	})
+
+	return title, subtitle, coverImage
+}
+
+// extractMetadataFromMarkdown extracts metadata from Markdown content
+func extractMetadataFromMarkdown(content string) (title, subtitle, coverImage string) {
+	lines := strings.Split(content, "\n")
+
+	for i, line := range lines {
+		line = strings.TrimSpace(line)
+
+		// Extract title from # heading
+		if strings.HasPrefix(line, "# ") && title == "" {
+			title = strings.TrimPrefix(line, "# ")
+			// Get next non-empty line as potential subtitle
+			for j := i + 1; j < len(lines) && j < i+5; j++ {
+				nextLine := strings.TrimSpace(lines[j])
+				if nextLine != "" && !strings.HasPrefix(nextLine, "#") && !strings.HasPrefix(nextLine, "![") {
+					subtitle = nextLine
+					break
+				}
+			}
+		}
+
+		// Extract cover image from ![...](...) syntax
+		if strings.HasPrefix(line, "![") && coverImage == "" {
+			start := strings.Index(line, "](")
+			end := strings.LastIndex(line, ")")
+			if start != -1 && end != -1 && start < end {
+				coverImage = line[start+2 : end]
+			}
+		}
+	}
+
+	return title, subtitle, coverImage
+}
+
+// extractMetadataFromText extracts metadata from plain text content
+func extractMetadataFromText(content string) (title, subtitle, coverImage string) {
+	lines := strings.Split(content, "\n")
+
+	// First non-empty line is the title
+	for i, line := range lines {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			title = line
+			// Get next non-empty line as subtitle
+			for j := i + 1; j < len(lines) && j < i+5; j++ {
+				nextLine := strings.TrimSpace(lines[j])
+				if nextLine != "" {
+					subtitle = nextLine
+					break
+				}
+			}
+			break
+		}
+	}
+
+	// No cover image extraction for text format
+	return title, subtitle, ""
 }
