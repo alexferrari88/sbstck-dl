@@ -121,9 +121,11 @@ type postMetadata struct {
 	WordCount    int      `json:"word_count,omitempty"`
 	CoverImage   string   `json:"cover_image,omitempty"`
 	OutputPath   string   `json:"output_path"`
-	Format       string   `json:"format"`
-	LastModified string   `json:"last_modified,omitempty"`
-	NotionLinks  []string `json:"notion_links"`
+	Format        string   `json:"format"`
+	LastModified  string   `json:"last_modified,omitempty"`
+	NotionLinks   []string `json:"notion_links"`
+	PodcastURL    string   `json:"podcast_url,omitempty"`
+	VideoUploadID string   `json:"video_upload_id,omitempty"`
 }
 
 func writeMetadataSidecar(post lib.Post, outputPath string, outputFolder string, format string, downloadedAt time.Time, lastModified string) {
@@ -144,10 +146,12 @@ func writeMetadataSidecar(post lib.Post, outputPath string, outputFolder string,
 		DownloadedAt: downloadedAt.UTC().Format(time.RFC3339),
 		WordCount:    post.WordCount,
 		CoverImage:   post.CoverImage,
-		OutputPath:   relPath,
-		Format:       format,
-		LastModified: lastModified,
-		NotionLinks:  lib.ExtractNotionLinks(post.BodyHTML, "html"),
+		OutputPath:    relPath,
+		Format:        format,
+		LastModified:  lastModified,
+		NotionLinks:   lib.ExtractNotionLinks(post.BodyHTML, "html"),
+		PodcastURL:    post.PodcastUrl,
+		VideoUploadID: getVideoUploadID(post),
 	}
 
 	data, err := json.MarshalIndent(meta, "", "  ")
@@ -212,6 +216,13 @@ func readMetadataSidecar(outputPath string) (postMetadata, bool) {
 		return postMetadata{}, false
 	}
 	return meta, true
+}
+
+func getVideoUploadID(post lib.Post) string {
+	if post.VideoUpload != nil {
+		return post.VideoUpload.Id
+	}
+	return ""
 }
 
 func normalizeLayout(value string) string {

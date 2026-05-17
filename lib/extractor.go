@@ -51,10 +51,25 @@ type Post struct {
 	Description      string    `json:"description"`
 	Subtitle         string    `json:"subtitle,omitempty"`
 	WordCount        int       `json:"wordcount"`
-	Title            string    `json:"title"`
-	BodyHTML         string    `json:"body_html"`
-	Tags             []PostTag `json:"tags,omitempty"`
-	Categories       []PostTag `json:"categories,omitempty"`
+	Title            string       `json:"title"`
+	BodyHTML         string       `json:"body_html"`
+	Tags             []PostTag    `json:"tags,omitempty"`
+	Categories       []PostTag    `json:"categories,omitempty"`
+	PodcastUrl       string       `json:"podcast_url,omitempty"`
+	VideoUpload      *VideoUpload `json:"videoUpload,omitempty"`
+	PodcastUpload    *AudioUpload `json:"podcastUpload,omitempty"`
+	VoiceoverUpload  *AudioUpload `json:"voiceoverUpload,omitempty"`
+}
+
+type VideoUpload struct {
+	Id             string       `json:"id"`
+	Duration       float64      `json:"duration"`
+	ExtractedAudio *AudioUpload `json:"extractedAudio,omitempty"`
+}
+
+type AudioUpload struct {
+	Id       string  `json:"id"`
+	Duration float64 `json:"duration"`
 }
 
 type PostTag struct {
