@@ -3,7 +3,6 @@ package cmd
 import (
 	"fmt"
 	"net/url"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -125,12 +124,4 @@ func writeDownloadedPost(post lib.Post, path string) (*lib.ImageDownloadResult, 
 		fmt.Printf("Downloaded %d images (%d failed) for post %s\n", result.Success, result.Failed, post.Slug)
 	}
 	return result, err
-}
-
-// Atomic post writes preserve a valid prior file when replacement fails.
-func removeInvalidArchiveEntry(archive *lib.Archive, path string) {
-	info, err := os.Stat(path)
-	if err != nil || !info.Mode().IsRegular() || info.Size() == 0 {
-		archive.RemoveEntry(path)
-	}
 }

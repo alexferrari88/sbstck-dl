@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -156,18 +155,14 @@ func runDownload(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	archives := make(map[string]*lib.Archive)
+	var archiveWorkflow *lib.ArchiveWorkflow
 	if createArchive && !dryRun {
-		for _, selected := range formats {
-			archive, err := lib.LoadArchive(outputFolder, selected)
-			if err != nil {
-				return fmt.Errorf("restore archive %s (previous index preserved): %w", selected, err)
-			}
-			archives[selected] = archive
+		archiveWorkflow, err = lib.LoadArchiveWorkflow(outputFolder, formats)
+		if err != nil {
+			return err
 		}
 	}
 	var failures []error
-	bodyImages := make(map[string]*lib.ImageDownloadResult)
 	single := strings.Contains(downloadUrl, "/p/")
 	var urls []string
 	if single {
@@ -210,17 +205,6 @@ func runDownload(cmd *cobra.Command, args []string) error {
 		bar = progressbar.NewOptions(len(urls), progressbar.OptionSetWidth(25), progressbar.OptionSetDescription("downloading"), progressbar.OptionShowBytes(true))
 	}
 	downloadedPosts := 0
-	recordImages := func(path string, images *lib.ImageDownloadResult) {
-		if images == nil {
-			return
-		}
-		key := filepath.Clean(path)
-		if bodyImages[key] == nil {
-			bodyImages[key] = &lib.ImageDownloadResult{}
-		}
-		bodyImages[key].Images = append(bodyImages[key].Images, images.Images...)
-	}
-
 	var extensions []string
 	if fileExtensions != "" {
 		extensions = strings.Split(strings.ReplaceAll(fileExtensions, " ", ""), ",")
@@ -261,22 +245,15 @@ func runDownload(cmd *cobra.Command, args []string) error {
 			}
 		}
 		prepared, images, mediaErr := post.PrepareMedia(ctx, outputFolder, downloadImages, lib.ImageQuality(imageQuality), imagesDir, downloadFiles && filesSupported, extensions, filesDir, fetcher)
-		// Share proofs with retained and new entries, even if an output write fails.
-		for _, selected := range formats {
-			recordImages(makePath(post, outputFolder, selected), images)
-			if archive := archives[selected]; archive != nil {
-				for _, entry := range archive.Entries {
-					if entry.Post.Slug == post.Slug {
-						recordImages(entry.FilePath, images)
-					}
-				}
-			}
-		}
 		if mediaErr != nil {
+			if archiveWorkflow != nil {
+				archiveWorkflow.RecordPost(post, images, nil)
+			}
 			failures = append(failures, fmt.Errorf("write post %s: %w", post.Slug, mediaErr))
 			continue
 		}
 		postWritten := false
+		var writes []lib.ArchivePostWrite
 		for _, selected := range missing {
 			path := makePath(post, outputFolder, selected)
 			if verbose {
@@ -286,28 +263,20 @@ func runDownload(cmd *cobra.Command, args []string) error {
 			if selected == "txt" {
 				output = post
 			}
-			if err := output.WriteToFile(path, selected, addSourceURL); err != nil {
-				failures = append(failures, fmt.Errorf("write post %s: %w", path, err))
-				if archive := archives[selected]; archive != nil {
-					removeInvalidArchiveEntry(archive, path)
-				}
+			writeErr := output.WriteToFile(path, selected, addSourceURL)
+			writes = append(writes, lib.ArchivePostWrite{Format: selected, Path: path, DownloadTime: time.Now(), Err: writeErr})
+			if writeErr != nil {
+				failures = append(failures, fmt.Errorf("write post %s: %w", path, writeErr))
 			} else {
 				postWritten = true
 				if inventory[post.Slug] == nil {
 					inventory[post.Slug] = make(map[string]bool)
 				}
 				inventory[post.Slug][selected] = true
-				if archive := archives[selected]; archive != nil {
-					archive.AddEntry(post, path, time.Now())
-					if images != nil {
-						for i := range archive.Entries {
-							if filepath.Clean(archive.Entries[i].FilePath) == filepath.Clean(path) {
-								archive.Entries[i].MediaUpdated = true
-							}
-						}
-					}
-				}
 			}
+		}
+		if archiveWorkflow != nil {
+			archiveWorkflow.RecordPost(post, images, writes)
 		}
 		if postWritten {
 			downloadedPosts++
@@ -331,55 +300,21 @@ func runDownload(cmd *cobra.Command, args []string) error {
 		fmt.Printf("Downloaded %d posts, out of %d\nDone in %s\n", downloadedPosts, len(urls), time.Since(startTime))
 	}
 
-	if len(archives) == 0 {
+	if archiveWorkflow == nil {
 		return errors.Join(failures...)
 	}
-	if _, err := os.Stat(outputFolder); os.IsNotExist(err) {
-		return errors.Join(failures...)
-	}
+	var downloader *lib.ImageDownloader
 	if downloadImages {
-		combined := lib.NewArchive()
-		for _, selected := range formats {
-			combined.Entries = append(combined.Entries, archives[selected].Entries...)
-		}
-		downloader := lib.NewImageDownloader(fetcher, outputFolder, imagesDir, lib.ImageQuality(imageQuality))
-		warnings, err := combined.LocalizeCovers(ctx, downloader, bodyImages)
-		for _, warning := range warnings {
-			fmt.Fprintf(cmd.ErrOrStderr(), "Warning: %v\n", warning)
-		}
-		if err != nil {
-			return errors.Join(append(failures, fmt.Errorf("localize archive covers: %w", err))...)
-		}
-		offset := 0
-		for _, selected := range formats {
-			n := len(archives[selected].Entries)
-			archives[selected].Entries = combined.Entries[offset : offset+n]
-			offset += n
-		}
+		downloader = lib.NewImageDownloader(fetcher, outputFolder, imagesDir, lib.ImageQuality(imageQuality))
 	}
-	for _, selected := range formats {
-		archive := archives[selected]
-		if err := archive.SaveMetadata(outputFolder, selected); err != nil {
-			failures = append(failures, fmt.Errorf("save archive metadata %s (previous index preserved): %w", selected, err))
-			continue
-		}
-		if verbose {
-			fmt.Printf("Generating archive page in %s format...\n", selected)
-		}
-		var err error
-		switch selected {
-		case "html":
-			err = archive.GenerateHTML(outputFolder)
-		case "md":
-			err = archive.GenerateMarkdown(outputFolder)
-		case "txt":
-			err = archive.GenerateText(outputFolder)
-		}
-		if err != nil {
-			failures = append(failures, fmt.Errorf("publish archive %s (previous index preserved): %w", selected, err))
-		} else if verbose {
+	publication := archiveWorkflow.Publish(ctx, downloader)
+	for _, warning := range publication.Warnings {
+		fmt.Fprintf(cmd.ErrOrStderr(), "Warning: %v\n", warning)
+	}
+	if verbose {
+		for _, selected := range publication.PublishedFormats {
 			fmt.Printf("Archive page generated: %s/index.%s\n", outputFolder, selected)
 		}
 	}
-	return errors.Join(failures...)
+	return errors.Join(append(failures, publication.Err)...)
 }

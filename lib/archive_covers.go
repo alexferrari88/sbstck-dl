@@ -105,6 +105,17 @@ func (id *ImageDownloader) downloadCoverImage(ctx context.Context, source, slug 
 // Only verified successful results from this invocation may supply body assets.
 // Ordinary cover failures are warnings; cancellation stops archive publication.
 func (a *Archive) LocalizeCovers(ctx context.Context, downloader *ImageDownloader, bodyImages map[string]*ImageDownloadResult) ([]error, error) {
+	var attempts []ImageInfo
+	for _, result := range bodyImages {
+		if result != nil {
+			attempts = append(attempts, result.Images...)
+		}
+	}
+	return a.localizeCovers(ctx, downloader, bodyImages, attempts)
+}
+
+// attempts includes media preparation events whose post writes all failed.
+func (a *Archive) localizeCovers(ctx context.Context, downloader *ImageDownloader, bodyImages map[string]*ImageDownloadResult, attempts []ImageInfo) ([]error, error) {
 	var warnings []error
 	// A body download can replace an asset referenced by retained metadata.
 	// Conflicting/failed attempts cannot certify its source, even if another
@@ -114,23 +125,18 @@ func (a *Archive) LocalizeCovers(ctx context.Context, downloader *ImageDownloade
 		invalid bool
 	}
 	proofs := make(map[string]bodyProof)
-	for _, result := range bodyImages {
-		if result == nil {
+	for _, image := range attempts {
+		if image.LocalPath == "" {
 			continue
 		}
-		for _, image := range result.Images {
-			if image.LocalPath == "" {
+		source := coverSourceIdentity(image.OriginalURL)
+		for _, imagePath := range []string{image.LocalPath, image.OriginalPath} {
+			if imagePath == "" {
 				continue
 			}
-			source := coverSourceIdentity(image.OriginalURL)
-			for _, imagePath := range []string{image.LocalPath, image.OriginalPath} {
-				if imagePath == "" {
-					continue
-				}
-				path := filepath.Clean(imagePath)
-				old, exists := proofs[path]
-				proofs[path] = bodyProof{source: source, invalid: old.invalid || !image.Success || (exists && old.source != source)}
-			}
+			path := filepath.Clean(imagePath)
+			old, exists := proofs[path]
+			proofs[path] = bodyProof{source: source, invalid: old.invalid || !image.Success || (exists && old.source != source)}
 		}
 	}
 	verifiedPath := func(path, identity string) bool {
