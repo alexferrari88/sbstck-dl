@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -26,13 +25,14 @@ const (
 
 // ImageInfo contains information about a downloaded image
 type ImageInfo struct {
-	OriginalURL string
-	LocalPath   string
-	Width       int
-	Height      int
-	Format      string
-	Success     bool
-	Error       error
+	OriginalURL  string
+	OriginalPath string // Downloaded source bytes, before any browser preview
+	LocalPath    string
+	Width        int
+	Height       int
+	Format       string
+	Success      bool
+	Error        error
 }
 
 // ImageDownloader handles downloading and processing images from Substack posts
@@ -432,28 +432,7 @@ func (id *ImageDownloader) downloadSingleImage(ctx context.Context, imageURL, im
 	}
 	defer body.Close()
 
-	// Create the local file
-	file, err := os.Create(localPath)
-	if err != nil {
-		imageInfo.Error = fmt.Errorf("failed to create local file: %w", err)
-		return imageInfo
-	}
-	defer file.Close()
-
-	// Copy image data
-	_, err = io.Copy(file, body)
-	if err != nil {
-		imageInfo.Error = fmt.Errorf("failed to write image data: %w", err)
-		os.Remove(localPath) // Clean up failed file
-		return imageInfo
-	}
-
-	// Extract image metadata
-	imageInfo.Format = id.getImageFormat(filename)
-	imageInfo.Width, imageInfo.Height = id.extractDimensionsFromURL(imageURL)
-
-	imageInfo.Success = true
-	return imageInfo
+	return id.saveImage(ctx, imageURL, localPath, body)
 }
 
 // generateSafeFilename generates a safe filename from an image URL
@@ -560,6 +539,9 @@ func (id *ImageDownloader) updateHTMLWithLocalPaths(htmlContent string, urlToLoc
 		}
 		// Always ensure forward slashes for HTML (web standard)
 		relPath = strings.ReplaceAll(relPath, "\\", "/")
+		if originalPreviewPath(localPath) != localPath {
+			relPath = (&url.URL{Path: relPath}).String()
+		}
 		urlToRelPath[originalURL] = relPath
 	}
 
@@ -626,6 +608,9 @@ func (id *ImageDownloader) updateHTMLWithStringReplacement(htmlContent string, u
 		// Always ensure forward slashes for HTML (web standard)
 		// Convert any backslashes to forward slashes regardless of platform
 		relPath = strings.ReplaceAll(relPath, "\\", "/")
+		if originalPreviewPath(localPath) != localPath {
+			relPath = (&url.URL{Path: relPath}).String()
+		}
 
 		// Replace URL in various contexts
 		updatedHTML = strings.ReplaceAll(updatedHTML, originalURL, relPath)

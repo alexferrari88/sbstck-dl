@@ -71,11 +71,17 @@ jobs:
         run: |
           env GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build -v -o sbstck-dl-${{ matrix.name }}-${{ matrix.goarch }}${{ matrix.extension }}
           
+      - name: Package decoder source and notices
+        shell: bash
+        run: tar -czf sbstck-dl-${{ matrix.name }}-${{ matrix.goarch }}-decoder-source.tar.gz internal/heicpreview go.mod go.sum LICENSE
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: sbstck-dl-${{ matrix.name }}-${{ matrix.goarch }}
-          path: sbstck-dl-${{ matrix.name }}-${{ matrix.goarch }}${{ matrix.extension }}
+          path: |
+            sbstck-dl-${{ matrix.name }}-${{ matrix.goarch }}${{ matrix.extension }}
+            sbstck-dl-${{ matrix.name }}-${{ matrix.goarch }}-decoder-source.tar.gz
           
   release-upload:
     name: Attach Artifacts to Release

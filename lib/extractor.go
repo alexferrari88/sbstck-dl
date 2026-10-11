@@ -214,6 +214,7 @@ type ArchiveEntry struct {
 	FilePath        string
 	DownloadTime    time.Time
 	LocalCoverImage string
+	MediaUpdated    bool // Transient: body media belongs to a successfully written post this run.
 }
 
 // Archive represents a collection of posts for the archive page

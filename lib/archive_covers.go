@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
-	"io"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -85,36 +84,21 @@ func (id *ImageDownloader) downloadCoverImage(ctx context.Context, source, slug 
 		return ImageInfo{OriginalURL: source, Error: err}
 	}
 	if usableImage(path) {
-		return ImageInfo{OriginalURL: source, LocalPath: path, Success: true}
+		cached := id.localImage(ctx, source, path)
+		if cached.Success || ctx.Err() != nil {
+			return cached
+		}
+		// A failed cached conversion is retried from its retained source URL.
 	}
 	if err := os.MkdirAll(imagesPath, 0755); err != nil {
 		return ImageInfo{OriginalURL: source, Error: err}
 	}
-	result := ImageInfo{OriginalURL: source, LocalPath: path}
 	body, err := id.fetcher.FetchURL(ctx, source)
 	if err != nil {
-		result.Error = fmt.Errorf("failed to fetch cover image: %w", err)
-		return result
+		return ImageInfo{OriginalURL: source, LocalPath: path, Error: fmt.Errorf("failed to fetch cover image: %w", err)}
 	}
 	defer body.Close()
-	err = writeFileAtomicallyWith(path, func(file *os.File) error {
-		size, err := io.Copy(file, body)
-		if err != nil {
-			return err
-		}
-		if size == 0 {
-			return fmt.Errorf("downloaded cover image is empty")
-		}
-		return ctx.Err()
-	})
-	if err != nil {
-		result.Error = fmt.Errorf("failed to save cover image: %w", err)
-		return result
-	}
-	result.Success = true
-	result.Format = id.getImageFormat(filename)
-	result.Width, result.Height = id.extractDimensionsFromURL(source)
-	return result
+	return id.saveImage(ctx, source, path, body)
 }
 
 // LocalizeCovers also visits retained entries when no post bodies were fetched.
@@ -138,20 +122,107 @@ func (a *Archive) LocalizeCovers(ctx context.Context, downloader *ImageDownloade
 			if image.LocalPath == "" {
 				continue
 			}
-			path := filepath.Clean(image.LocalPath)
 			source := coverSourceIdentity(image.OriginalURL)
-			old, exists := proofs[path]
-			proofs[path] = bodyProof{source: source, invalid: old.invalid || !image.Success || (exists && old.source != source)}
+			for _, imagePath := range []string{image.LocalPath, image.OriginalPath} {
+				if imagePath == "" {
+					continue
+				}
+				path := filepath.Clean(imagePath)
+				old, exists := proofs[path]
+				proofs[path] = bodyProof{source: source, invalid: old.invalid || !image.Success || (exists && old.source != source)}
+			}
 		}
 	}
 	verifiedPath := func(path, identity string) bool {
 		proof, attempted := proofs[filepath.Clean(path)]
 		return !attempted || (!proof.invalid && proof.source == identity)
 	}
+	// A successfully rewritten post must prefer this run's matching body image.
+	// Old content-specific previews remain valid for posts whose write failed.
+	current := make(map[int]bool)
+	for i := range a.Entries {
+		entry := &a.Entries[i]
+		if !entry.MediaUpdated {
+			continue
+		}
+		result := bodyImages[filepath.Clean(entry.FilePath)]
+		if result == nil {
+			continue
+		}
+		identity := coverSourceIdentity(entry.Post.CoverImage)
+		for j := len(result.Images) - 1; j >= 0; j-- {
+			image := result.Images[j]
+			if coverSourceIdentity(image.OriginalURL) != identity {
+				continue
+			}
+			entry.LocalCoverImage = ""
+			if image.Success && usableImage(image.LocalPath) && verifiedPath(image.LocalPath, identity) {
+				current[i] = true
+				relative, err := downloader.relativeCoverPath(image.LocalPath)
+				if err != nil {
+					return warnings, err
+				}
+				entry.LocalCoverImage = relative
+			} else if !image.Success {
+				current[i] = true
+				warnings = append(warnings, fmt.Errorf("cover image for %s could not be converted; using remote source: %w", entry.Post.Title, image.Error))
+			}
+			break
+		}
+	}
+	// Old archives may retain HEIC originals or a now missing PNG preview.
+	// Convert from local bytes before seeding reuse, without refetching posts.
+	migrated := make(map[string]ImageInfo)
+	for i := range a.Entries {
+		entry := &a.Entries[i]
+		if current[i] {
+			continue
+		}
+		if !validLocalCoverPath(entry.LocalCoverImage) {
+			continue
+		}
+		path := filepath.Join(downloader.outputDir, filepath.FromSlash(entry.LocalCoverImage))
+		if !verifiedPath(path, coverSourceIdentity(entry.Post.CoverImage)) {
+			continue
+		}
+		original := originalPreviewPath(path)
+		if usableImage(path) && original != path {
+			if _, err := cachedPreview(path); err == nil {
+				original = path
+			}
+		}
+		if !verifiedPath(original, coverSourceIdentity(entry.Post.CoverImage)) {
+			continue
+		}
+		if !usableImage(path) && !usableImage(original) {
+			continue
+		}
+		result, exists := migrated[path]
+		if !exists {
+			result = downloader.localImage(ctx, entry.Post.CoverImage, original)
+			migrated[path] = result
+		}
+		if err := ctx.Err(); err != nil {
+			return warnings, err
+		}
+		if result.Success {
+			relative, err := downloader.relativeCoverPath(result.LocalPath)
+			if err != nil {
+				return warnings, err
+			}
+			entry.LocalCoverImage = relative
+		} else {
+			entry.LocalCoverImage = ""
+			warnings = append(warnings, fmt.Errorf("cover image for %s could not be converted; using remote source: %w", entry.Post.Title, result.Error))
+		}
+	}
 	reused := make(map[string]string)
 	// Seed all retained references before visiting formats: a later archive
 	// may already hold a usable asset that an earlier archive is missing.
-	for _, entry := range a.Entries {
+	for i, entry := range a.Entries {
+		if current[i] {
+			continue
+		}
 		path := filepath.Join(downloader.outputDir, filepath.FromSlash(entry.LocalCoverImage))
 		identity := coverSourceIdentity(entry.Post.CoverImage)
 		if entry.Post.CoverImage != "" && validLocalCoverPath(entry.LocalCoverImage) && usableImage(path) && verifiedPath(path, identity) {
@@ -164,6 +235,9 @@ func (a *Archive) LocalizeCovers(ctx context.Context, downloader *ImageDownloade
 			return warnings, err
 		}
 		entry := &a.Entries[i]
+		if current[i] {
+			continue
+		}
 		source := entry.Post.CoverImage
 		if source == "" {
 			continue

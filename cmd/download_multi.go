@@ -299,15 +299,30 @@ func runDownload(cmd *cobra.Command, args []string) error {
 				inventory[post.Slug][selected] = true
 				if archive := archives[selected]; archive != nil {
 					archive.AddEntry(post, path, time.Now())
+					if images != nil {
+						for i := range archive.Entries {
+							if filepath.Clean(archive.Entries[i].FilePath) == filepath.Clean(path) {
+								archive.Entries[i].MediaUpdated = true
+							}
+						}
+					}
 				}
 			}
 		}
 		if postWritten {
 			downloadedPosts++
 		}
-		if verbose && images != nil && images.Success > 0 {
-			fmt.Printf("Downloaded %d images (%d failed) for post %s\n", images.Success, images.Failed, post.Slug)
+		if images != nil {
+			if verbose {
+				fmt.Printf("Downloaded %d images (%d failed) for post %s\n", images.Success, images.Failed, post.Slug)
+			}
+			for _, image := range images.Images {
+				if image.Error != nil {
+					fmt.Fprintf(cmd.ErrOrStderr(), "Warning: image %s: %v; using remote source\n", image.OriginalURL, image.Error)
+				}
+			}
 		}
+
 	}
 	if err := ctx.Err(); err != nil {
 		return errors.Join(append(failures, err)...)
