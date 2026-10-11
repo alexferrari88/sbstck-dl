@@ -70,7 +70,7 @@ Flags:
   -d, --dry-run                Enable dry run
       --file-extensions string Comma-separated list of file extensions to download (e.g., 'pdf,docx,txt'). If empty, downloads all file types
       --files-dir string       Directory name for downloaded file attachments (default "files")
-  -f, --format string          Specify the output format (options: "html", "md", "txt" (default "html")
+  -f, --format stringArray     Output formats: html, md, txt (comma-separated, space-separated, or repeated; default: html)
   -h, --help                   help for download
       --image-quality string   Image quality to download (options: "high", "medium", "low") (default "high")
       --images-dir string      Directory name for downloaded images (default "images")
@@ -86,6 +86,20 @@ Global Flags:
   -r, --rate int        Specify the rate of requests per second (default 2)
   -v, --verbose         Enable verbose output
 ```
+
+#### Multiple output formats
+
+HTML is the default. Download several formats in one invocation using any of:
+
+```bash
+sbstck-dl download --url https://example.substack.com --format html,md,txt
+sbstck-dl download --url https://example.substack.com --format html md txt
+sbstck-dl download --url https://example.substack.com -f html -f md -f txt
+```
+
+Selections are normalized and deduplicated in the requested order. Empty or unsupported formats and unexpected arguments fail before downloading. Each post and its requested images/attachments are processed once; HTML and Markdown share local media references. Text keeps its original plain-text content, and a text-only download does not download attachments.
+
+Bulk downloads fill missing formats while preserving complete local files. An explicit `/p/` post URL overwrites every selected format. With `--create-archive`, each selected format gets its own index and compact manifest; retained entries and localized covers are refreshed even when no new posts need downloading. A write or publication failure returns a nonzero status while allowing other selected formats to publish.
 
 #### Adding Source URL
 
@@ -191,7 +205,7 @@ output/
 Use the `--create-archive` flag to generate an organized index page that links all downloaded posts with their metadata. This creates a beautiful overview of your downloaded content, making it easy to browse and access your Substack archive.
 
 **Features:**
-- Creates `index.{format}` file matching your selected output format (HTML/Markdown/Text)
+- Creates `index.{format}` file for each selected output format (HTML/Markdown/Text)
 - Links to all downloaded posts using relative file paths
 - Displays post titles, publication dates, and download timestamps
 - Shows post descriptions/subtitles and cover images when available

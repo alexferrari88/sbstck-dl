@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -10,7 +9,6 @@ import (
 	"time"
 
 	"github.com/alexferrari88/sbstck-dl/lib"
-	"github.com/schollz/progressbar/v3"
 	"github.com/spf13/cobra"
 )
 
@@ -18,6 +16,7 @@ import (
 var (
 	downloadUrl    string
 	format         string
+	formatValues   []string
 	outputFolder   string
 	dryRun         bool
 	addSourceURL   bool
@@ -32,203 +31,14 @@ var (
 		Use:   "download",
 		Short: "Download individual posts or the entire public archive",
 		Long:  `You can provide the url of a single post or the main url of the Substack you want to download.`,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			startTime := time.Now()
-
-			// Create archive instance if flag is set
-			var archive *lib.Archive
-			if createArchive && !dryRun {
-				var err error
-				archive, err = lib.LoadArchive(outputFolder, format)
-				if err != nil {
-					return fmt.Errorf("restore archive (previous index preserved): %w", err)
-				}
-			}
-			var writeErrors []error
-			bodyImages := make(map[string]*lib.ImageDownloadResult)
-			recordImages := func(path string, result *lib.ImageDownloadResult) {
-				if archive == nil || result == nil {
-					return
-				}
-				key := filepath.Clean(path)
-				if bodyImages[key] == nil {
-					bodyImages[key] = &lib.ImageDownloadResult{}
-				}
-				bodyImages[key].Images = append(bodyImages[key].Images, result.Images...)
-			}
-
-			// if url contains "/p/", we are downloading a single post
-			if strings.Contains(downloadUrl, "/p/") {
-				if verbose {
-					fmt.Printf("Downloading post %s\n", downloadUrl)
-				}
-				if dryRun {
-					fmt.Println("Dry run, exiting...")
-					return nil
-				}
-				if (beforeDate != "" || afterDate != "") && verbose {
-					fmt.Println("Warning: --before and --after flags are ignored when downloading a single post")
-				}
-
-				post, err := extractor.ExtractPost(ctx, downloadUrl)
-				if err != nil {
-					return err
-				}
-				downloadTime := time.Since(startTime)
-				if verbose {
-					fmt.Printf("Downloaded post %s in %s\n", downloadUrl, downloadTime)
-				}
-
-				path := makePath(post, outputFolder, format)
-				if verbose {
-					fmt.Printf("Writing post to file %s\n", path)
-				}
-
-				imageResult, err := writeDownloadedPost(post, path)
-				recordImages(path, imageResult)
-				if err != nil {
-					writeErrors = append(writeErrors, fmt.Errorf("write post %s: %w", path, err))
-					if archive != nil {
-						removeInvalidArchiveEntry(archive, path)
-					}
-				} else if archive != nil {
-					archive.AddEntry(post, path, startTime)
-				}
-
-				if verbose {
-					fmt.Println("Done in ", time.Since(startTime))
-				}
-			} else {
-				// we are downloading the entire archive
-				var downloadedPostsCount int
-				dateFilterfunc := makeDateFilterFunc(beforeDate, afterDate)
-				urls, err := extractor.GetAllPostsURLs(ctx, downloadUrl, dateFilterfunc)
-				urlsCount := len(urls)
-				if err != nil {
-					return err
-				}
-				if urlsCount == 0 && archive == nil {
-					if verbose {
-						fmt.Println("No posts found, exiting...")
-					}
-					return nil
-				}
-				if verbose {
-					fmt.Printf("Found %d posts\n", urlsCount)
-				}
-				if dryRun {
-					fmt.Printf("Found %d posts\n", urlsCount)
-					fmt.Println("Dry run, exiting...")
-					return nil
-				}
-				urls, err = filterExistingPosts(urls, outputFolder, format)
-				if err != nil {
-					if verbose {
-						fmt.Println("Error filtering existing posts:", err)
-					}
-				}
-				if len(urls) == 0 && archive == nil {
-					if verbose {
-						fmt.Println("No new posts found, exiting...")
-					}
-					return nil
-				}
-				bar := progressbar.NewOptions(len(urls),
-					progressbar.OptionSetWidth(25),
-					progressbar.OptionSetDescription("downloading"),
-					progressbar.OptionShowBytes(true))
-				for result := range extractor.ExtractAllPosts(ctx, urls) {
-					select {
-					case <-ctx.Done():
-						return ctx.Err()
-					default:
-					}
-					if result.Err != nil {
-						if verbose {
-							fmt.Printf("Error downloading post %s: %s\n", result.Post.CanonicalUrl, result.Err)
-							fmt.Println("Skipping...")
-						}
-						continue
-					}
-					bar.Add(1)
-					if verbose {
-						fmt.Printf("Downloading post %s\n", result.Post.CanonicalUrl)
-					}
-					post := result.Post
-
-					path := makePath(post, outputFolder, format)
-					if verbose {
-						fmt.Printf("Writing post to file %s\n", path)
-					}
-
-					imageResult, err := writeDownloadedPost(post, path)
-					recordImages(path, imageResult)
-					if err != nil {
-						writeErrors = append(writeErrors, fmt.Errorf("write post %s: %w", path, err))
-						if archive != nil {
-							removeInvalidArchiveEntry(archive, path)
-						}
-					} else {
-						downloadedPostsCount++
-						if archive != nil {
-							archive.AddEntry(post, path, time.Now())
-						}
-					}
-				}
-				if verbose {
-					fmt.Println("Downloaded", downloadedPostsCount, "posts, out of", len(urls))
-					fmt.Println("Done in ", time.Since(startTime))
-				}
-			}
-
-			// Generate archive page if enabled
-			if archive != nil {
-				if _, err := os.Stat(outputFolder); os.IsNotExist(err) {
-					return errors.Join(writeErrors...)
-				}
-				if downloadImages {
-					downloader := lib.NewImageDownloader(fetcher, outputFolder, imagesDir, lib.ImageQuality(imageQuality))
-					warnings, err := archive.LocalizeCovers(ctx, downloader, bodyImages)
-					for _, warning := range warnings {
-						fmt.Fprintf(cmd.ErrOrStderr(), "Warning: %v\n", warning)
-					}
-					if err != nil {
-						return errors.Join(append(writeErrors, fmt.Errorf("localize archive covers: %w", err))...)
-					}
-				}
-				if err := archive.SaveMetadata(outputFolder, format); err != nil {
-					return errors.Join(append(writeErrors, fmt.Errorf("save archive metadata (previous index preserved): %w", err))...)
-				}
-				if verbose {
-					fmt.Printf("Generating archive page in %s format...\n", format)
-				}
-
-				var archiveErr error
-				switch format {
-				case "html":
-					archiveErr = archive.GenerateHTML(outputFolder)
-				case "md":
-					archiveErr = archive.GenerateMarkdown(outputFolder)
-				case "txt":
-					archiveErr = archive.GenerateText(outputFolder)
-				default:
-					archiveErr = fmt.Errorf("unknown format for archive: %s", format)
-				}
-
-				if archiveErr != nil {
-					writeErrors = append(writeErrors, fmt.Errorf("publish archive (previous index preserved): %w", archiveErr))
-				} else if verbose {
-					fmt.Printf("Archive page generated: %s/index.%s\n", outputFolder, format)
-				}
-			}
-			return errors.Join(writeErrors...)
-		},
+		Args:  cobra.NoArgs,
+		RunE:  runDownload,
 	}
 )
 
 func init() {
 	downloadCmd.Flags().StringVarP(&downloadUrl, "url", "u", "", "Specify the Substack url")
-	downloadCmd.Flags().StringVarP(&format, "format", "f", "html", "Specify the output format (options: \"html\", \"md\", \"txt\"")
+	downloadCmd.Flags().StringArrayVarP(&formatValues, "format", "f", nil, "Output formats: html, md, txt (comma-separated, space-separated, or repeated; default: html)")
 	downloadCmd.Flags().StringVarP(&outputFolder, "output", "o", ".", "Specify the download directory")
 	downloadCmd.Flags().BoolVarP(&dryRun, "dry-run", "d", false, "Enable dry run")
 	downloadCmd.Flags().BoolVar(&addSourceURL, "add-source-url", false, "Add the original post URL at the end of the downloaded file")

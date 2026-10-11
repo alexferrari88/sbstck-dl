@@ -149,6 +149,16 @@ func (a *Archive) LocalizeCovers(ctx context.Context, downloader *ImageDownloade
 		return !attempted || (!proof.invalid && proof.source == identity)
 	}
 	reused := make(map[string]string)
+	// Seed all retained references before visiting formats: a later archive
+	// may already hold a usable asset that an earlier archive is missing.
+	for _, entry := range a.Entries {
+		path := filepath.Join(downloader.outputDir, filepath.FromSlash(entry.LocalCoverImage))
+		identity := coverSourceIdentity(entry.Post.CoverImage)
+		if entry.Post.CoverImage != "" && validLocalCoverPath(entry.LocalCoverImage) && usableImage(path) && verifiedPath(path, identity) {
+			reused[identity] = entry.LocalCoverImage
+		}
+	}
+	attempted := make(map[string]ImageInfo)
 	for i := range a.Entries {
 		if err := ctx.Err(); err != nil {
 			return warnings, err
@@ -191,7 +201,11 @@ func (a *Archive) LocalizeCovers(ctx context.Context, downloader *ImageDownloade
 			}
 		}
 		if entry.LocalCoverImage == "" {
-			result := downloader.downloadCoverImage(ctx, source, entry.Post.Slug)
+			result, exists := attempted[identity]
+			if !exists {
+				result = downloader.downloadCoverImage(ctx, source, entry.Post.Slug)
+				attempted[identity] = result
+			}
 			if err := ctx.Err(); err != nil {
 				return warnings, err
 			}

@@ -111,9 +111,19 @@ func (p *Post) WriteToFile(path string, format string, addSourceURL bool) error 
 		return err
 	}
 
-	content, err := p.contentForFormat(format, true)
+	content, err := p.fileContent(format, addSourceURL)
 	if err != nil {
 		return err
+	}
+
+	return writeFileAtomically(path, []byte(content))
+}
+
+// fileContent keeps source URL rendering identical across the public writers.
+func (p *Post) fileContent(format string, addSourceURL bool) (string, error) {
+	content, err := p.contentForFormat(format, true)
+	if err != nil {
+		return "", err
 	}
 
 	if addSourceURL && p.CanonicalUrl != "" {
@@ -126,136 +136,66 @@ func (p *Post) WriteToFile(path string, format string, addSourceURL bool) error 
 		content += sourceLine
 	}
 
-	return writeFileAtomically(path, []byte(content))
+	return content, nil
 }
 
-// WriteToFileWithImages writes the Post's content to a file with optional image downloading
-func (p *Post) WriteToFileWithImages(ctx context.Context, path string, format string, addSourceURL bool, 
-	downloadImages bool, imageQuality ImageQuality, imagesDir string, 
+// PrepareMedia downloads and rewrites a canonical HTML body once for all outputs.
+// Plain text continues to render the original body, without local image links.
+func (p Post) PrepareMedia(ctx context.Context, outputDir string,
+	downloadImages bool, imageQuality ImageQuality, imagesDir string,
+	downloadFiles bool, fileExtensions []string, filesDir string, fetcher *Fetcher) (Post, *ImageDownloadResult, error) {
+	prepared := p
+	var images *ImageDownloadResult
+	if downloadImages {
+		var err error
+		images, err = NewImageDownloader(fetcher, outputDir, imagesDir, imageQuality).DownloadImages(ctx, prepared.BodyHTML, p.Slug)
+		if err != nil {
+			return p, images, fmt.Errorf("failed to download images: %w", err)
+		}
+		prepared.BodyHTML = images.UpdatedHTML
+	}
+	if err := ctx.Err(); err != nil {
+		return p, images, err
+	}
+	if downloadFiles {
+		files, err := NewFileDownloader(fetcher, outputDir, filesDir, fileExtensions).DownloadFiles(ctx, prepared.BodyHTML, p.Slug)
+		if err != nil {
+			return p, images, fmt.Errorf("failed to download files: %w", err)
+		}
+		prepared.BodyHTML = files.UpdatedHTML
+	}
+	return prepared, images, ctx.Err()
+}
+
+// WriteToFileWithImages retains the single-output API over the shared media pass.
+func (p *Post) WriteToFileWithImages(ctx context.Context, path string, format string, addSourceURL bool,
+	downloadImages bool, imageQuality ImageQuality, imagesDir string,
 	downloadFiles bool, fileExtensions []string, filesDir string, fetcher *Fetcher) (*ImageDownloadResult, error) {
-	
+	if _, err := p.contentForFormat(format, true); err != nil {
+		return nil, err
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return nil, err
 	}
-
-	content, err := p.contentForFormat(format, true)
+	prepared, result, err := p.PrepareMedia(ctx, filepath.Dir(path), downloadImages, imageQuality, imagesDir,
+		downloadFiles && format != "txt", fileExtensions, filesDir, fetcher)
 	if err != nil {
-		return nil, err
+		return result, err
 	}
-
-	var imageResult *ImageDownloadResult
-
-	// Download images if requested and format supports it
-	if downloadImages && (format == "html" || format == "md") {
-		outputDir := filepath.Dir(path)
-		imageDownloader := NewImageDownloader(fetcher, outputDir, imagesDir, imageQuality)
-		
-		// Only process HTML content for image downloading
-		htmlContent := content
-		if format == "md" {
-			// For markdown, we need to work with the original HTML
-			htmlContent = p.BodyHTML
-		}
-		
-		imageResult, err = imageDownloader.DownloadImages(ctx, htmlContent, p.Slug)
+	if format == "txt" {
+		prepared = *p
+	}
+	if err := prepared.WriteToFile(path, format, addSourceURL); err != nil {
+		return result, err
+	}
+	if result == nil {
+		content, err := prepared.fileContent(format, addSourceURL)
 		if err != nil {
-			return nil, fmt.Errorf("failed to download images: %w", err)
+			return nil, err
 		}
-
-		// Update content based on format
-		if format == "html" {
-			content = imageResult.UpdatedHTML
-			// Re-add title if needed
-			if strings.HasPrefix(content, "<h1>") {
-				// Title already included
-			} else {
-				content = fmt.Sprintf("<h1>%s</h1>\n\n%s", p.Title, imageResult.UpdatedHTML)
-			}
-		} else if format == "md" {
-			// Convert updated HTML to markdown
-			updatedContent, err := mdConverter.ConvertString(imageResult.UpdatedHTML)
-			if err != nil {
-				return imageResult, fmt.Errorf("failed to convert updated HTML to markdown: %w", err)
-			}
-			content = fmt.Sprintf("# %s\n\n%s", p.Title, updatedContent)
-		}
-	} else if downloadImages && format == "txt" {
-		// For text format, we can't embed images, but we can still download them
-		outputDir := filepath.Dir(path)
-		imageDownloader := NewImageDownloader(fetcher, outputDir, imagesDir, imageQuality)
-		
-		imageResult, err = imageDownloader.DownloadImages(ctx, p.BodyHTML, p.Slug)
-		if err != nil {
-			return nil, fmt.Errorf("failed to download images: %w", err)
-		}
-		// Keep original text content since we can't embed images in text format
+		result = &ImageDownloadResult{Images: []ImageInfo{}, UpdatedHTML: content}
 	}
-
-	// Download files if requested and format supports it
-	if downloadFiles && (format == "html" || format == "md") {
-		outputDir := filepath.Dir(path)
-		fileDownloader := NewFileDownloader(fetcher, outputDir, filesDir, fileExtensions)
-		
-		// Process HTML content for file downloading - use the updated HTML from images if available
-		htmlContent := content
-		if imageResult != nil && imageResult.UpdatedHTML != "" {
-			htmlContent = imageResult.UpdatedHTML
-		} else if format == "md" {
-			// For markdown, we need to work with the original HTML
-			htmlContent = p.BodyHTML
-		}
-		
-		fileResult, err := fileDownloader.DownloadFiles(ctx, htmlContent, p.Slug)
-		if err != nil {
-			return imageResult, fmt.Errorf("failed to download files: %w", err)
-		}
-
-		// Update content based on format if files were processed
-		if fileResult.Success > 0 || fileResult.Failed > 0 {
-			if format == "html" {
-				content = fileResult.UpdatedHTML
-				// Re-add title if needed
-				if !strings.HasPrefix(content, "<h1>") {
-					content = fmt.Sprintf("<h1>%s</h1>\n\n%s", p.Title, fileResult.UpdatedHTML)
-				}
-			} else if format == "md" {
-				// Convert updated HTML to markdown
-				updatedContent, err := mdConverter.ConvertString(fileResult.UpdatedHTML)
-				if err != nil {
-					return imageResult, fmt.Errorf("failed to convert updated HTML to markdown: %w", err)
-				}
-				content = fmt.Sprintf("# %s\n\n%s", p.Title, updatedContent)
-			}
-		}
-	}
-
-	// Add source URL if requested
-	if addSourceURL && p.CanonicalUrl != "" {
-		sourceLine := fmt.Sprintf("\n\noriginal content: %s", p.CanonicalUrl)
-
-		// Adjust formatting slightly for HTML
-		if format == "html" {
-			sourceLine = fmt.Sprintf("<p style=\"margin-top: 2em; font-size: small; color: grey;\">original content: <a href=\"%s\">%s</a></p>", p.CanonicalUrl, p.CanonicalUrl)
-		}
-		content += sourceLine
-	}
-
-	// Write the file
-	if err := writeFileAtomically(path, []byte(content)); err != nil {
-		return imageResult, err
-	}
-
-	// Return empty result if no image downloading was performed
-	if imageResult == nil {
-		imageResult = &ImageDownloadResult{
-			Images:      []ImageInfo{},
-			UpdatedHTML: content,
-			Success:     0,
-			Failed:      0,
-		}
-	}
-
-	return imageResult, nil
+	return result, nil
 }
 
 // PostWrapper wraps a Post object for JSON unmarshaling.
