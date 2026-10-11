@@ -13,6 +13,10 @@ We provide binaries for Linux, MacOS and Windows.
 
 Building from source requires Go 1.27.2 or later. CI and release builds use the version specified in `go.mod`.
 
+Maintainers: use the [validated release workflow](docs/agents/releases.md). Releases
+are published only after native Linux, macOS, and Windows tests and builds pass
+and all binaries and decoder-source bundles are uploaded and verified in a draft.
+
 ```bash
 go install github.com/alexferrari88/sbstck-dl
 ```

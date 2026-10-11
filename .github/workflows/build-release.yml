@@ -1,111 +1,134 @@
-name: Manual Build and Release
+name: Validate, Build, and Release
+
 on:
   workflow_dispatch:
     inputs:
       branch:
-        description: 'Branch to build'
+        description: 'Source branch, tag, or commit to validate'
         required: true
         default: 'main'
-  release:
-    types: [created]
+      tag:
+        description: 'Release tag (vX.Y.Z); leave empty to validate without publishing'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ inputs.tag || github.run_id }}
+  cancel-in-progress: false
 
 jobs:
-  test:
-    name: Run Tests
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+  prepare:
+    name: Resolve Source
+    runs-on: ubuntu-latest
+    outputs:
+      commit: ${{ steps.source.outputs.commit }}
     steps:
-      - name: Check out code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
-          ref: ${{ github.event.inputs.branch || github.ref }}
-        
-      - name: Set up Go
-        uses: actions/setup-go@v4
-        with:
-          go-version-file: go.mod
-          
-      - name: Run tests
-        run: go test -v -timeout=10m ./...
+          ref: ${{ inputs.branch }}
+          fetch-depth: 0
+      - name: Freeze source and check tag
+        id: source
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          commit=$(git rev-parse HEAD)
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+          if [[ -n "$RELEASE_TAG" ]]; then
+            [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'Tag must be vX.Y.Z'; exit 1; }
+            if git show-ref --verify --quiet "refs/tags/$RELEASE_TAG"; then
+              [[ $(git rev-parse "refs/tags/$RELEASE_TAG^{commit}") == "$commit" ]] || { echo 'Tag points to another commit'; exit 1; }
+            fi
+          fi
 
-  build:
-    name: Build
-    needs: test
-    if: success()
+  validate-build:
+    name: Validate and Build (${{ matrix.name }})
+    needs: prepare
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
         include:
           - os: ubuntu-latest
             goos: linux
-            goarch: amd64
             name: ubuntu
-            extension: ""
+            extension: ''
           - os: macos-latest
             goos: darwin
-            goarch: amd64
             name: mac
-            extension: ""
+            extension: ''
           - os: windows-latest
             goos: windows
-            goarch: amd64
             name: win
-            extension: ".exe"
+            extension: '.exe'
+    defaults:
+      run:
+        shell: bash
     steps:
-      - name: Check out code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
-          ref: ${{ github.event.inputs.branch || github.ref }}
-        
-      - name: Set up Go
-        uses: actions/setup-go@v4
+          ref: ${{ needs.prepare.outputs.commit }}
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
-          
-      - name: Build
+      - name: Test release publication gate
+        run: python3 -m unittest discover -s .github/scripts -p 'test_*.py'
+      - name: Run native tests
+        run: go test -v -timeout=10m ./...
+      - name: Vet
+        run: go vet ./...
+      - name: Check release version
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
         run: |
-          env GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build -v -o sbstck-dl-${{ matrix.name }}-${{ matrix.goarch }}${{ matrix.extension }}
-          
+          version=$(go run . version)
+          echo "$version"
+          if [[ -n "$RELEASE_TAG" ]]; then
+            [[ "$version" == "sbstck-dl $RELEASE_TAG" ]] || { echo 'CLI version does not match release tag'; exit 1; }
+          fi
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: amd64
+          CGO_ENABLED: '0'
+          BINARY: sbstck-dl-${{ matrix.name }}-amd64${{ matrix.extension }}
+        run: go build -v -o "$BINARY" .
       - name: Package decoder source and notices
-        shell: bash
-        run: tar -czf sbstck-dl-${{ matrix.name }}-${{ matrix.goarch }}-decoder-source.tar.gz internal/heicpreview go.mod go.sum LICENSE
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        env:
+          SOURCE_ARCHIVE: sbstck-dl-${{ matrix.name }}-amd64-decoder-source.tar.gz
+        run: tar -czf "$SOURCE_ARCHIVE" internal/heicpreview go.mod go.sum LICENSE
+      - uses: actions/upload-artifact@v7
         with:
-          name: sbstck-dl-${{ matrix.name }}-${{ matrix.goarch }}
+          name: sbstck-dl-${{ matrix.name }}-amd64
+          if-no-files-found: error
           path: |
-            sbstck-dl-${{ matrix.name }}-${{ matrix.goarch }}${{ matrix.extension }}
-            sbstck-dl-${{ matrix.name }}-${{ matrix.goarch }}-decoder-source.tar.gz
-          
-  release-upload:
-    name: Attach Artifacts to Release
-    if: github.event_name == 'release'
-    needs: build
+            sbstck-dl-${{ matrix.name }}-amd64${{ matrix.extension }}
+            sbstck-dl-${{ matrix.name }}-amd64-decoder-source.tar.gz
+
+  release:
+    name: Verify Assets and Publish
+    needs: [prepare, validate-build]
     runs-on: ubuntu-latest
     permissions:
-      contents: write  # This is needed for release uploads
+      contents: write
     steps:
-      - name: Debug event info
-        run: |
-          echo "Event name: ${{ github.event_name }}"
-          echo "Event type: ${{ github.event.action }}"
-          echo "Release tag: ${{ github.event.release.tag_name }}"
-        
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7
         with:
+          ref: ${{ needs.prepare.outputs.commit }}
+          fetch-depth: 0
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: sbstck-dl-*
+          merge-multiple: true
           path: artifacts
-      
-      - name: List artifacts
-        run: find artifacts -type f | sort
-          
-      - name: Upload artifacts to release
-        uses: softprops/action-gh-release@v1
-        with:
-          files: artifacts/**/*
-          # GitHub automatically provides this token
-          token: ${{ github.token }}
+      - name: Verify complete asset set (publish only with a tag)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          RELEASE_COMMIT: ${{ needs.prepare.outputs.commit }}
+        run: python3 .github/scripts/release.py artifacts

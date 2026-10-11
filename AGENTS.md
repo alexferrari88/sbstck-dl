@@ -21,6 +21,11 @@ If validation, fast-forwarding, pushing, or parity verification fails, preserve 
 
 ## Agent skills
 
+### Releases
+
+When publishing or retrying a release, follow `docs/agents/releases.md`.
+The workflow validates all platforms and uploads verified assets to a draft before publication.
+
 ### Issue tracker
 
 Issues and specs live in GitHub Issues for `alexferrari88/sbstck-dl`.

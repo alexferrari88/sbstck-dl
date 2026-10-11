@@ -1,13 +1,13 @@
 # Current work
 
-Goal: publish v0.8.1 with the completed archive, discovery, multiple-format, HEIC-preview, and fetch-retry work since v0.7.
+Goal: validate and build all three platforms before publishing any release, preventing public releases without binaries.
 
-Status: v0.8.1 is published and is GitHub's latest release: https://github.com/alexferrari88/sbstck-dl/releases/tag/v0.8.1. The immutable tag points to 16c5f85855c07636a6fa2d6acf9cef92a07c1830. Native tests, builds, and uploads passed on Linux, macOS, and Windows in workflow run 38122985346. All six downloadable assets were verified against GitHub's SHA-256 digests; the downloaded Linux binary reports v0.8.1. Release code and tests were pushed to main; this handoff update is documentation only.
+Status: implementation complete; local checks passed. v0.8.1 remains the verified latest release; no new application release is requested. Live build-only validation is next.
 
-Release scope: cumulative archive indexes and atomic publication; fallback discovery for publications without usable sitemaps; local archive covers; multiple output formats per download; bundled HEIC/HEIF PNG previews with retained originals and decoder-source/license assets; Go 1.27.2 and isolated concurrent retry state; archive workflow ownership refactor.
+Scope: replace the post-publication release event with a manual validation/build/publish workflow; keep build-only dispatches; verify the complete six-asset set before and after draft uploads; publish only after successful native tests and builds. Document the release command and add failure-path checks for the publication gate.
 
-Decisions: v0.8.0's Windows job exposed two Unix-specific permission assertions, blocking all asset builds. Preserve that published tag and ship the test fix as v0.8.1; the v0.8.0 release page now directs users to v0.8.1. Tests compare actual permissions before and after the operation. Existing Linux, macOS, and Windows amd64 asset names are preserved. No unrelated feature or issue work is included. Existing #23/#27 await reporter evidence; #24/#21 remain deferred.
+Decisions: resolve the requested source once to a commit SHA and use that SHA in every job. Serialize releases for the same tag. Preserve asset names, existing published tags/releases, and custom draft notes. Failed tests/builds create no release; upload/verification failures leave a draft. A nonempty release tag must match the CLI version. Blank tag performs validation only.
 
-Validation: the v0.8.0 candidate passed 463 Linux race-suite checks, with the existing optional scraped-HTML fixture test skipped, plus vet, module verification, diff checks, and CGo-disabled Linux/Windows/macOS builds. Both corrected HEIC tests passed under the Linux race detector before v0.8.1 publication, and vet/diff checks passed again. The v0.8.1 workflow passed all three native suites and built the three binaries plus companion decoder-source archives. Downloaded source bundles contain the bridge, embedded decoder, build recipe, notices, and module files. Local/remote release-tag parity was verified; the source tag is preserved while main can advance for this documentation update.
+Validation: 14 publication-gate tests pass, including missing/empty assets, partial/corrupt uploads, upload errors, mismatched source tags/drafts, published releases, draft retries, and publish-last ordering. The gate verifies all six real v0.8.1 downloads in build-only mode. actionlint and shellcheck pass for both workflows after updating the official GitHub actions to supported Node 24 releases. Live three-platform build-only verification is pending.
 
-Next action: none for this release. Existing issue evidence requests and deferred work remain unchanged.
+Next action: push the completed workflow, run it with an empty tag, and verify all native jobs and artifacts without creating a release.
