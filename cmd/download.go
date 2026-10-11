@@ -45,6 +45,17 @@ var (
 				}
 			}
 			var writeErrors []error
+			bodyImages := make(map[string]*lib.ImageDownloadResult)
+			recordImages := func(path string, result *lib.ImageDownloadResult) {
+				if archive == nil || result == nil {
+					return
+				}
+				key := filepath.Clean(path)
+				if bodyImages[key] == nil {
+					bodyImages[key] = &lib.ImageDownloadResult{}
+				}
+				bodyImages[key].Images = append(bodyImages[key].Images, result.Images...)
+			}
 
 			// if url contains "/p/", we are downloading a single post
 			if strings.Contains(downloadUrl, "/p/") {
@@ -73,7 +84,9 @@ var (
 					fmt.Printf("Writing post to file %s\n", path)
 				}
 
-				if err := writeDownloadedPost(post, path); err != nil {
+				imageResult, err := writeDownloadedPost(post, path)
+				recordImages(path, imageResult)
+				if err != nil {
 					writeErrors = append(writeErrors, fmt.Errorf("write post %s: %w", path, err))
 					if archive != nil {
 						removeInvalidArchiveEntry(archive, path)
@@ -148,7 +161,9 @@ var (
 						fmt.Printf("Writing post to file %s\n", path)
 					}
 
-					if err := writeDownloadedPost(post, path); err != nil {
+					imageResult, err := writeDownloadedPost(post, path)
+					recordImages(path, imageResult)
+					if err != nil {
 						writeErrors = append(writeErrors, fmt.Errorf("write post %s: %w", path, err))
 						if archive != nil {
 							removeInvalidArchiveEntry(archive, path)
@@ -170,6 +185,16 @@ var (
 			if archive != nil {
 				if _, err := os.Stat(outputFolder); os.IsNotExist(err) {
 					return errors.Join(writeErrors...)
+				}
+				if downloadImages {
+					downloader := lib.NewImageDownloader(fetcher, outputFolder, imagesDir, lib.ImageQuality(imageQuality))
+					warnings, err := archive.LocalizeCovers(ctx, downloader, bodyImages)
+					for _, warning := range warnings {
+						fmt.Fprintf(cmd.ErrOrStderr(), "Warning: %v\n", warning)
+					}
+					if err != nil {
+						return errors.Join(append(writeErrors, fmt.Errorf("localize archive covers: %w", err))...)
+					}
 				}
 				if err := archive.SaveMetadata(outputFolder, format); err != nil {
 					return errors.Join(append(writeErrors, fmt.Errorf("save archive metadata (previous index preserved): %w", err))...)
@@ -277,9 +302,9 @@ func filterExistingPosts(urls []string, outputFolder string, format string) ([]s
 }
 
 // The same success check applies to plain posts and posts with downloaded media.
-func writeDownloadedPost(post lib.Post, path string) error {
+func writeDownloadedPost(post lib.Post, path string) (*lib.ImageDownloadResult, error) {
 	if !downloadImages && !downloadFiles {
-		return post.WriteToFile(path, format, addSourceURL)
+		return nil, post.WriteToFile(path, format, addSourceURL)
 	}
 	var extensions []string
 	if fileExtensions != "" {
@@ -289,7 +314,7 @@ func writeDownloadedPost(post lib.Post, path string) error {
 	if err == nil && verbose && result.Success > 0 {
 		fmt.Printf("Downloaded %d images (%d failed) for post %s\n", result.Success, result.Failed, post.Slug)
 	}
-	return err
+	return result, err
 }
 
 // Atomic post writes preserve a valid prior file when replacement fails.

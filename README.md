@@ -223,6 +223,10 @@ Older output folders are recovered from the downloader's root-level `YYYYMMDD_HH
 
 Posts, archive indexes, and metadata files are published with temporary files and atomic replacement. Restoration errors stop the command before downloads and preserve the existing index. Publication and post-write errors return a nonzero exit status. Metadata is saved before the index; if index publication fails, the prior index stays intact and a later run can use the saved metadata to rebuild it. Dry runs do not write either file. Only successfully written posts are added to the current index; a failed overwrite retains the prior complete post and its index entry.
 
+With `--create-archive --download-images`, HTML and Markdown archive covers use local assets. A matching successful body-image download is reused; otherwise the cover is downloaded into a source-specific `covers` subdirectory under the configured `--images-dir`. This prevents a cover from replacing an unrelated body image with the same filename. Nested image directories are supported, and index links stay relative to the archive folder.
+
+Cover localization also runs when every post is already downloaded. Metadata keeps the original cover URL and the successful local path, so later runs reuse existing assets, retry missing covers, and continue working after the archive folder is moved. Without `--download-images`, no cover requests are made. A failed cover download emits a warning and keeps the remote URL as a fallback; the post and index remain usable. Cancellation stops index publication with an error. Legacy files without retained cover-source metadata cannot recover covers without downloading the post again.
+
 **Archive Content Per Post:**
 - **Title**: Clickable link to the downloaded post file
 - **Publication Date**: When the post was originally published on Substack

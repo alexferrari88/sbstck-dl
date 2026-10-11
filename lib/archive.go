@@ -16,13 +16,14 @@ import (
 // Store only index metadata, not the full post body. Paths are relative to the
 // output folder so an archive remains portable when moved.
 type archiveRecord struct {
-	File         string    `json:"file"`
-	Title        string    `json:"title"`
-	PostDate     string    `json:"post_date"`
-	Subtitle     string    `json:"subtitle,omitempty"`
-	Description  string    `json:"description,omitempty"`
-	CoverImage   string    `json:"cover_image,omitempty"`
-	DownloadTime time.Time `json:"download_time"`
+	File            string    `json:"file"`
+	Title           string    `json:"title"`
+	PostDate        string    `json:"post_date"`
+	Subtitle        string    `json:"subtitle,omitempty"`
+	Description     string    `json:"description,omitempty"`
+	CoverImage      string    `json:"cover_image,omitempty"`
+	LocalCoverImage string    `json:"local_cover_image,omitempty"`
+	DownloadTime    time.Time `json:"download_time"`
 }
 
 type archiveManifest struct {
@@ -105,6 +106,12 @@ func LoadArchive(dir, format string) (*Archive, error) {
 		}
 		post := Post{Slug: match[2], Title: record.Title, PostDate: record.PostDate, Subtitle: record.Subtitle, Description: record.Description, CoverImage: record.CoverImage}
 		archive.AddEntry(post, path, record.DownloadTime)
+		for i := range archive.Entries {
+			if archive.Entries[i].FilePath == path {
+				archive.Entries[i].LocalCoverImage = record.LocalCoverImage
+				break
+			}
+		}
 	}
 	return archive, nil
 }
@@ -142,6 +149,9 @@ func validateArchiveRecord(record archiveRecord, format string) error {
 	if strings.TrimSpace(record.Title) == "" {
 		return fmt.Errorf("invalid archive metadata file %q: missing or empty title", record.File)
 	}
+	if record.LocalCoverImage != "" && !validLocalCoverPath(record.LocalCoverImage) {
+		return fmt.Errorf("invalid local cover image path %q", record.LocalCoverImage)
+	}
 	match := downloadedPostName.FindStringSubmatch(record.File)
 	if filepath.Base(record.File) != record.File || match == nil || match[3] != format {
 		return fmt.Errorf("invalid archive metadata file %q", record.File)
@@ -157,7 +167,7 @@ func (a *Archive) SaveMetadata(dir, format string) error {
 	manifest := archiveManifest{Version: 1, Entries: make([]archiveRecord, 0, len(a.Entries))}
 	seen := make(map[string]bool)
 	for _, entry := range a.Entries {
-		record := archiveRecord{File: filepath.Base(entry.FilePath), Title: entry.Post.Title, PostDate: entry.Post.PostDate, Subtitle: entry.Post.Subtitle, Description: entry.Post.Description, CoverImage: entry.Post.CoverImage, DownloadTime: entry.DownloadTime}
+		record := archiveRecord{File: filepath.Base(entry.FilePath), Title: entry.Post.Title, PostDate: entry.Post.PostDate, Subtitle: entry.Post.Subtitle, Description: entry.Post.Description, CoverImage: entry.Post.CoverImage, LocalCoverImage: entry.LocalCoverImage, DownloadTime: entry.DownloadTime}
 		if err := validateArchiveRecord(record, format); err != nil {
 			return err
 		}

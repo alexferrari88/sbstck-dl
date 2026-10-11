@@ -175,7 +175,7 @@ func (p *Post) WriteToFileWithImages(ctx context.Context, path string, format st
 			// Convert updated HTML to markdown
 			updatedContent, err := mdConverter.ConvertString(imageResult.UpdatedHTML)
 			if err != nil {
-				return nil, fmt.Errorf("failed to convert updated HTML to markdown: %w", err)
+				return imageResult, fmt.Errorf("failed to convert updated HTML to markdown: %w", err)
 			}
 			content = fmt.Sprintf("# %s\n\n%s", p.Title, updatedContent)
 		}
@@ -207,7 +207,7 @@ func (p *Post) WriteToFileWithImages(ctx context.Context, path string, format st
 		
 		fileResult, err := fileDownloader.DownloadFiles(ctx, htmlContent, p.Slug)
 		if err != nil {
-			return nil, fmt.Errorf("failed to download files: %w", err)
+			return imageResult, fmt.Errorf("failed to download files: %w", err)
 		}
 
 		// Update content based on format if files were processed
@@ -222,7 +222,7 @@ func (p *Post) WriteToFileWithImages(ctx context.Context, path string, format st
 				// Convert updated HTML to markdown
 				updatedContent, err := mdConverter.ConvertString(fileResult.UpdatedHTML)
 				if err != nil {
-					return nil, fmt.Errorf("failed to convert updated HTML to markdown: %w", err)
+					return imageResult, fmt.Errorf("failed to convert updated HTML to markdown: %w", err)
 				}
 				content = fmt.Sprintf("# %s\n\n%s", p.Title, updatedContent)
 			}
@@ -270,9 +270,10 @@ type Extractor struct {
 
 // ArchiveEntry represents a single entry in the archive page
 type ArchiveEntry struct {
-	Post         Post
-	FilePath     string
-	DownloadTime time.Time
+	Post            Post
+	FilePath        string
+	DownloadTime    time.Time
+	LocalCoverImage string
 }
 
 // Archive represents a collection of posts for the archive page
@@ -444,10 +445,18 @@ func (a *Archive) AddEntry(post Post, filePath string, downloadTime time.Time) {
 			post.Title = strings.TrimSuffix(filepath.Base(filePath), filepath.Ext(filePath))
 		}
 	}
+	localCover := ""
+	for _, old := range a.Entries {
+		if filepath.Clean(old.FilePath) == filepath.Clean(filePath) && old.Post.CoverImage == post.CoverImage {
+			localCover = old.LocalCoverImage
+			break
+		}
+	}
 	entry := ArchiveEntry{
-		Post:         post,
-		FilePath:     filePath,
-		DownloadTime: downloadTime,
+		Post:            post,
+		FilePath:        filePath,
+		DownloadTime:    downloadTime,
+		LocalCoverImage: localCover,
 	}
 
 	a.RemoveEntry(filePath)
@@ -517,9 +526,10 @@ func (a *Archive) GenerateHTML(outputDir string) error {
 `
 
 		// Add cover image if available
-		if entry.Post.CoverImage != "" {
+		coverImage := entry.CoverReference(outputDir)
+		if coverImage != "" {
 			html += fmt.Sprintf(`		<img src="%s" alt="Cover" class="cover-image">
-`, entry.Post.CoverImage)
+`, coverImage)
 		}
 
 		html += fmt.Sprintf(`		<h2><a href="%s">%s</a></h2>
@@ -569,8 +579,9 @@ func (a *Archive) GenerateMarkdown(outputDir string) error {
 		content += fmt.Sprintf("**Published:** %s | **Downloaded:** %s\n\n", pubDate, downloadDate)
 
 		// Add cover image if available
-		if entry.Post.CoverImage != "" {
-			content += fmt.Sprintf("![Cover Image](%s)\n\n", entry.Post.CoverImage)
+		coverImage := entry.CoverReference(outputDir)
+		if coverImage != "" {
+			content += fmt.Sprintf("![Cover Image](%s)\n\n", coverImage)
 		}
 
 		// Add subtitle/description

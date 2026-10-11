@@ -2,8 +2,8 @@
 
 Goal: triage the GitHub backlog and ship archive integrity (#20), post discovery (#14), and offline archive covers (#18).
 
-Status: all nine issues have category/state/priority labels and triage notes. #23 and #27 are needs-info. #20 is shipped and closed at eec1bea, with main/origin/remote parity verified. #14 is implemented and rebased onto #20; 85 combined focused tests, build, and vet pass, and the live CLI discovered 103 unique public posts. #18 is reproduced, has a verified brief, and implementation is underway in its own worktree. The coordinator owns GitHub updates and integration.
+Status: all nine issues have category/state/priority labels and triage notes. Archive integrity (#20), paginated discovery (#14), and local archive covers (#18) are implemented and integrated on main; GitHub completion comments identify the shipped commits. Final combined validation passed 377 tests, 110 focused race tests, build, vet, and diff checks. Windows amd64 and macOS arm64 command tests compile; runtime checks ran on Linux. Live #14 CLI discovery returned 103 unique public posts. #23 and #27 remain needs-info.
 
 Decisions: prioritize archive integrity (#20), post discovery (#14), then offline cover images (#18). Preserve legacy entries with documented title/date/mtime fallbacks and compact per-format metadata; atomically replace posts/indexes without broadening existing permissions. For #14, use paginated public archive API fallback rather than treating recent RSS/HTML pages as complete. #23 and #27 need reporter evidence before implementation. Export and media enhancements remain deferred.
 
-Next action: verify the rebased #14 checks and ship it, then validate and integrate #18 with final repository checks and remote parity.
+Next action: re-triage #23 and #27 when reporters supply evidence. Deferred enhancement order: #19 (multiple formats), #22 (HEIC conversion), #24 (video), then #21 (EPUB/PDF). No further implementation is currently assigned.
