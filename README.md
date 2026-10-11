@@ -11,6 +11,8 @@ We provide binaries for Linux, MacOS and Windows.
 
 ### Using Go
 
+Building from source requires Go 1.27.2 or later. CI and release builds use the version specified in `go.mod`.
+
 ```bash
 go install github.com/alexferrari88/sbstck-dl
 ```

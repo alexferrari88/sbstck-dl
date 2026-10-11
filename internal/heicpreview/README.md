@@ -3,7 +3,7 @@
 This directory adapts the MIT Go bridge from
 [gen2brain/heic v0.4.8](https://github.com/gen2brain/heic/tree/97b4f060b3afd2ea7b8cf0ec75d3cfc129dc027f).
 `lib/heif.wasm.gz`, `lib/heif.c`, and `lib/Makefile` are copied unchanged from that revision.
-The bridge runs only the bundled WebAssembly through wazero v1.6.0; it never loads native libraries, needs no CGo, and retains the application's Go 1.20 minimum.
+The bridge runs only the bundled WebAssembly through wazero v1.6.0; it never loads native libraries and needs no CGo. The application's Go requirement is specified in the root `go.mod`.
 Unlike the upstream Go bridge, each invocation has an isolated runtime, cancellation closes that runtime, and all initialization failures are returned as errors.
 The decoder runs one image at a time with a 30-second deadline, caps WASM linear memory at 512 MiB, compressed input at 64 MiB, and the primary image at 50 million pixels before pixel decoding. PNG encoding and cache validation run outside that decoder deadline.
 These bounds limit resources; exceptionally large, unsupported, or damaged files retain their originals and use remote references.

@@ -478,7 +478,7 @@ func TestFetchURLs(t *testing.T) {
 
 		f := NewFetcher()
 		ctx, cancel := context.WithCancel(context.Background())
-		
+
 		// Create multiple URLs
 		urls := []string{server.URL, server.URL, server.URL}
 		resultChan := f.FetchURLs(ctx, urls)
@@ -501,6 +501,76 @@ func TestFetchURLs(t *testing.T) {
 		// Should receive fewer results than total URLs due to cancellation
 		assert.LessOrEqual(t, results, len(urls))
 	})
+}
+
+func TestFetchURLsIndependentRetries(t *testing.T) {
+	for _, policy := range []string{"exponential", "constant", "zero", "custom"} {
+		t.Run(policy, func(t *testing.T) {
+			var mu sync.Mutex
+			attempts := make(map[string]int)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				mu.Lock()
+				attempts[r.URL.Path]++
+				attempt := attempts[r.URL.Path]
+				mu.Unlock()
+				if attempt <= 2 {
+					w.WriteHeader(http.StatusTooManyRequests)
+					return
+				}
+				fmt.Fprint(w, r.URL.Path)
+			}))
+			defer server.Close()
+
+			cfg := backoff.NewExponentialBackOff()
+			cfg.InitialInterval = time.Millisecond
+			cfg.RandomizationFactor = 0
+			cfg.Multiplier = 2
+			cfg.MaxInterval = 4 * time.Millisecond
+			cfg.MaxElapsedTime = time.Second
+			template := *cfg
+			var b backoff.BackOff = cfg
+			switch policy {
+			case "constant":
+				b = backoff.NewConstantBackOff(time.Millisecond)
+			case "zero":
+				b = &backoff.ZeroBackOff{}
+			case "custom":
+				// This wrapper has mutable retry-count state as well as an
+				// opaque underlying exponential policy.
+				b = backoff.WithMaxRetries(cfg, 2)
+			}
+			f := NewFetcher(WithBackOffConfig(b), WithRatePerSecond(10000), WithBurst(100))
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			urls := make([]string, 8)
+			for i := range urls {
+				urls[i] = fmt.Sprintf("%s/%d", server.URL, i)
+			}
+
+			results := make(map[string]string)
+			for result := range f.FetchURLs(ctx, urls) {
+				assert.NoError(t, result.Error)
+				if assert.NotNil(t, result.Body) {
+					data, err := io.ReadAll(result.Body)
+					result.Body.Close()
+					assert.NoError(t, err)
+					results[result.Url] = string(data)
+				}
+			}
+			assert.Len(t, results, len(urls))
+			mu.Lock()
+			for i, url := range urls {
+				path := fmt.Sprintf("/%d", i)
+				assert.Equal(t, path, results[url])
+				assert.Equal(t, 3, attempts[path])
+			}
+			mu.Unlock()
+			if policy == "exponential" {
+				// Request retries must not reset or advance the template.
+				assert.Equal(t, template, *cfg)
+			}
+		})
+	}
 }
 
 // TestFetchErrors tests the FetchError type

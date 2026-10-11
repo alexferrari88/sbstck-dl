@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
@@ -45,6 +46,7 @@ type Fetcher struct {
 	BackoffCfg  backoff.BackOff
 	Cookie      *http.Cookie
 	MaxWorkers  int
+	backoffMu   sync.Mutex
 }
 
 // FetcherOptions holds configurable options for Fetcher.
@@ -83,6 +85,8 @@ func WithProxyURL(proxyURL *url.URL) FetcherOption {
 }
 
 // WithBackOffConfig sets the backoff configuration for the Fetcher.
+// Configure the policy before fetching. Exponential and constant policies are
+// copied per request; retry loops using opaque custom policies are serialized.
 func WithBackOffConfig(b backoff.BackOff) FetcherOption {
 	return func(o *FetcherOptions) {
 		o.BackOffConfig = b
@@ -220,6 +224,25 @@ func (f *Fetcher) FetchURLs(ctx context.Context, urls []string) <-chan FetchResu
 
 // FetchURL fetches the specified URL with retries and rate limiting.
 func (f *Fetcher) FetchURL(ctx context.Context, url string) (io.ReadCloser, error) {
+	requestBackoff := f.BackoffCfg
+	switch cfg := requestBackoff.(type) {
+	case *backoff.ExponentialBackOff:
+		// RetryNotify resets and advances its policy. Keep the configured
+		// template untouched so each request has an independent schedule.
+		copy := *cfg
+		requestBackoff = &copy
+	case *backoff.ConstantBackOff:
+		copy := *cfg
+		requestBackoff = &copy
+	case *backoff.ZeroBackOff, *backoff.StopBackOff:
+		// These policies have no mutable retry state.
+	default:
+		// BackOff does not expose a clone operation. Preserve custom policies
+		// by protecting their entire retry loop, including resets and waits.
+		f.backoffMu.Lock()
+		defer f.backoffMu.Unlock()
+	}
+
 	var body io.ReadCloser
 	var err error
 	var retryCounter int
@@ -250,7 +273,7 @@ func (f *Fetcher) FetchURL(ctx context.Context, url string) (io.ReadCloser, erro
 	// Use backoff with notification for logging
 	err = backoff.RetryNotify(
 		operation,
-		f.BackoffCfg,
+		requestBackoff,
 		func(err error, d time.Duration) {
 			// This could be connected to a logger
 			_ = err // Avoid unused variable error

@@ -1,6 +1,6 @@
 module github.com/alexferrari88/sbstck-dl
 
-go 1.20
+go 1.27.2
 
 require (
 	github.com/JohannesKaufmann/html-to-markdown v1.5.0
