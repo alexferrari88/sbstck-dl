@@ -127,7 +127,7 @@ func (p *Post) WriteToFile(path string, format string, addSourceURL bool) error 
 		content += sourceLine
 	}
 
-	return os.WriteFile(path, []byte(content), 0644)
+	return writeFileAtomically(path, []byte(content))
 }
 
 // WriteToFileWithImages writes the Post's content to a file with optional image downloading
@@ -242,7 +242,7 @@ func (p *Post) WriteToFileWithImages(ctx context.Context, path string, format st
 	}
 
 	// Write the file
-	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+	if err := writeFileAtomically(path, []byte(content)); err != nil {
 		return imageResult, err
 	}
 
@@ -496,12 +496,19 @@ func NewArchive() *Archive {
 
 // AddEntry adds a new entry to the archive, sorted by publication date (newest first)
 func (a *Archive) AddEntry(post Post, filePath string, downloadTime time.Time) {
+	if strings.TrimSpace(post.Title) == "" {
+		post.Title = post.Slug
+		if strings.TrimSpace(post.Title) == "" {
+			post.Title = strings.TrimSuffix(filepath.Base(filePath), filepath.Ext(filePath))
+		}
+	}
 	entry := ArchiveEntry{
 		Post:         post,
 		FilePath:     filePath,
 		DownloadTime: downloadTime,
 	}
-	
+
+	a.RemoveEntry(filePath)
 	a.Entries = append(a.Entries, entry)
 	a.sortEntries()
 }
@@ -509,23 +516,26 @@ func (a *Archive) AddEntry(post Post, filePath string, downloadTime time.Time) {
 // sortEntries sorts archive entries by publication date (newest first)
 func (a *Archive) sortEntries() {
 	sort.Slice(a.Entries, func(i, j int) bool {
-		// Parse post dates and compare (newest first)
-		dateI, errI := time.Parse(time.RFC3339, a.Entries[i].Post.PostDate)
-		dateJ, errJ := time.Parse(time.RFC3339, a.Entries[j].Post.PostDate)
-		
-		if errI != nil || errJ != nil {
-			// If parsing fails, sort by title
-			return a.Entries[i].Post.Title < a.Entries[j].Post.Title
+		left, right := a.Entries[i], a.Entries[j]
+		dateI, errI := time.Parse(time.RFC3339, left.Post.PostDate)
+		dateJ, errJ := time.Parse(time.RFC3339, right.Post.PostDate)
+		if (errI == nil) != (errJ == nil) {
+			return errI == nil
 		}
-		
-		return dateI.After(dateJ) // newest first
+		if errI == nil && !dateI.Equal(dateJ) {
+			return dateI.After(dateJ)
+		}
+		if left.Post.Title != right.Post.Title {
+			return left.Post.Title < right.Post.Title
+		}
+		return left.FilePath < right.FilePath
 	})
 }
 
 // GenerateHTML creates an HTML archive page
 func (a *Archive) GenerateHTML(outputDir string) error {
 	archivePath := filepath.Join(outputDir, "index.html")
-	
+
 	html := `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -551,29 +561,29 @@ func (a *Archive) GenerateHTML(outputDir string) error {
 	for _, entry := range a.Entries {
 		// Make file path relative from archive directory
 		relPath, _ := filepath.Rel(outputDir, entry.FilePath)
-		
+
 		// Format publication date
 		pubDate := entry.Post.PostDate
 		if parsedDate, err := time.Parse(time.RFC3339, entry.Post.PostDate); err == nil {
 			pubDate = parsedDate.Format("January 2, 2006")
 		}
-		
+
 		// Format download date
 		downloadDate := entry.DownloadTime.Format("January 2, 2006 15:04")
-		
+
 		html += `	<div class="post">
 `
-		
+
 		// Add cover image if available
 		if entry.Post.CoverImage != "" {
 			html += fmt.Sprintf(`		<img src="%s" alt="Cover" class="cover-image">
 `, entry.Post.CoverImage)
 		}
-		
+
 		html += fmt.Sprintf(`		<h2><a href="%s">%s</a></h2>
 		<div class="meta">Published: %s | Downloaded: %s</div>
 `, relPath, entry.Post.Title, pubDate, downloadDate)
-		
+
 		// Add subtitle/description
 		description := entry.Post.Subtitle
 		if description == "" {
@@ -583,44 +593,44 @@ func (a *Archive) GenerateHTML(outputDir string) error {
 			html += fmt.Sprintf(`		<div class="subtitle">%s</div>
 `, description)
 		}
-		
+
 		html += `	</div>
 `
 	}
-	
+
 	html += `</body>
 </html>`
-	
-	return os.WriteFile(archivePath, []byte(html), 0644)
+
+	return writeFileAtomically(archivePath, []byte(html))
 }
 
 // GenerateMarkdown creates a Markdown archive page
 func (a *Archive) GenerateMarkdown(outputDir string) error {
 	archivePath := filepath.Join(outputDir, "index.md")
-	
+
 	content := "# Substack Archive\n\n"
-	
+
 	for _, entry := range a.Entries {
 		// Make file path relative from archive directory
 		relPath, _ := filepath.Rel(outputDir, entry.FilePath)
-		
+
 		// Format publication date
 		pubDate := entry.Post.PostDate
 		if parsedDate, err := time.Parse(time.RFC3339, entry.Post.PostDate); err == nil {
 			pubDate = parsedDate.Format("January 2, 2006")
 		}
-		
+
 		// Format download date
 		downloadDate := entry.DownloadTime.Format("January 2, 2006 15:04")
-		
+
 		content += fmt.Sprintf("## [%s](%s)\n\n", entry.Post.Title, relPath)
 		content += fmt.Sprintf("**Published:** %s | **Downloaded:** %s\n\n", pubDate, downloadDate)
-		
+
 		// Add cover image if available
 		if entry.Post.CoverImage != "" {
 			content += fmt.Sprintf("![Cover Image](%s)\n\n", entry.Post.CoverImage)
 		}
-		
+
 		// Add subtitle/description
 		description := entry.Post.Subtitle
 		if description == "" {
@@ -629,37 +639,37 @@ func (a *Archive) GenerateMarkdown(outputDir string) error {
 		if description != "" {
 			content += fmt.Sprintf("*%s*\n\n", description)
 		}
-		
+
 		content += "---\n\n"
 	}
-	
-	return os.WriteFile(archivePath, []byte(content), 0644)
+
+	return writeFileAtomically(archivePath, []byte(content))
 }
 
 // GenerateText creates a plain text archive page
 func (a *Archive) GenerateText(outputDir string) error {
 	archivePath := filepath.Join(outputDir, "index.txt")
-	
+
 	content := "SUBSTACK ARCHIVE\n================\n\n"
-	
+
 	for _, entry := range a.Entries {
 		// Make file path relative from archive directory
 		relPath, _ := filepath.Rel(outputDir, entry.FilePath)
-		
+
 		// Format publication date
 		pubDate := entry.Post.PostDate
 		if parsedDate, err := time.Parse(time.RFC3339, entry.Post.PostDate); err == nil {
 			pubDate = parsedDate.Format("January 2, 2006")
 		}
-		
+
 		// Format download date
 		downloadDate := entry.DownloadTime.Format("January 2, 2006 15:04")
-		
+
 		content += fmt.Sprintf("Title: %s\n", entry.Post.Title)
 		content += fmt.Sprintf("File: %s\n", relPath)
 		content += fmt.Sprintf("Published: %s\n", pubDate)
 		content += fmt.Sprintf("Downloaded: %s\n", downloadDate)
-		
+
 		// Add subtitle/description
 		description := entry.Post.Subtitle
 		if description == "" {
@@ -668,9 +678,9 @@ func (a *Archive) GenerateText(outputDir string) error {
 		if description != "" {
 			content += fmt.Sprintf("Description: %s\n", description)
 		}
-		
+
 		content += "\n" + strings.Repeat("-", 50) + "\n\n"
 	}
-	
-	return os.WriteFile(archivePath, []byte(content), 0644)
+
+	return writeFileAtomically(archivePath, []byte(content))
 }

@@ -1,9 +1,10 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
-	"log"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -31,14 +32,19 @@ var (
 		Use:   "download",
 		Short: "Download individual posts or the entire public archive",
 		Long:  `You can provide the url of a single post or the main url of the Substack you want to download.`,
-		Run: func(cmd *cobra.Command, args []string) {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			startTime := time.Now()
-			
+
 			// Create archive instance if flag is set
 			var archive *lib.Archive
-			if createArchive {
-				archive = lib.NewArchive()
+			if createArchive && !dryRun {
+				var err error
+				archive, err = lib.LoadArchive(outputFolder, format)
+				if err != nil {
+					return fmt.Errorf("restore archive (previous index preserved): %w", err)
+				}
 			}
+			var writeErrors []error
 
 			// if url contains "/p/", we are downloading a single post
 			if strings.Contains(downloadUrl, "/p/") {
@@ -47,7 +53,7 @@ var (
 				}
 				if dryRun {
 					fmt.Println("Dry run, exiting...")
-					return
+					return nil
 				}
 				if (beforeDate != "" || afterDate != "") && verbose {
 					fmt.Println("Warning: --before and --after flags are ignored when downloading a single post")
@@ -55,7 +61,7 @@ var (
 
 				post, err := extractor.ExtractPost(ctx, downloadUrl)
 				if err != nil {
-					log.Fatalln(err)
+					return err
 				}
 				downloadTime := time.Since(startTime)
 				if verbose {
@@ -67,28 +73,12 @@ var (
 					fmt.Printf("Writing post to file %s\n", path)
 				}
 
-				if downloadImages || downloadFiles {
-					imageQualityEnum := lib.ImageQuality(imageQuality)
-					// Parse file extensions if specified
-					var fileExtensionsSlice []string
-					if fileExtensions != "" {
-						fileExtensionsSlice = strings.Split(strings.ReplaceAll(fileExtensions, " ", ""), ",")
+				if err := writeDownloadedPost(post, path); err != nil {
+					writeErrors = append(writeErrors, fmt.Errorf("write post %s: %w", path, err))
+					if archive != nil {
+						removeInvalidArchiveEntry(archive, path)
 					}
-					imageResult, err := post.WriteToFileWithImages(ctx, path, format, addSourceURL, downloadImages, imageQualityEnum, imagesDir, downloadFiles, fileExtensionsSlice, filesDir, fetcher)
-					if err != nil {
-						log.Printf("Error writing file %s: %v\n", path, err)
-					} else if verbose && imageResult.Success > 0 {
-						fmt.Printf("Downloaded %d images (%d failed) for post %s\n", imageResult.Success, imageResult.Failed, post.Slug)
-					}
-				} else {
-					err = post.WriteToFile(path, format, addSourceURL)
-					if err != nil {
-						log.Printf("Error writing file %s: %v\n", path, err)
-					}
-				}
-
-				// Add to archive if enabled
-				if archive != nil {
+				} else if archive != nil {
 					archive.AddEntry(post, path, startTime)
 				}
 
@@ -102,13 +92,13 @@ var (
 				urls, err := extractor.GetAllPostsURLs(ctx, downloadUrl, dateFilterfunc)
 				urlsCount := len(urls)
 				if err != nil {
-					log.Fatalln(err)
+					return err
 				}
-				if urlsCount == 0 {
+				if urlsCount == 0 && archive == nil {
 					if verbose {
 						fmt.Println("No posts found, exiting...")
 					}
-					return
+					return nil
 				}
 				if verbose {
 					fmt.Printf("Found %d posts\n", urlsCount)
@@ -116,7 +106,7 @@ var (
 				if dryRun {
 					fmt.Printf("Found %d posts\n", urlsCount)
 					fmt.Println("Dry run, exiting...")
-					return
+					return nil
 				}
 				urls, err = filterExistingPosts(urls, outputFolder, format)
 				if err != nil {
@@ -124,11 +114,11 @@ var (
 						fmt.Println("Error filtering existing posts:", err)
 					}
 				}
-				if len(urls) == 0 {
+				if len(urls) == 0 && archive == nil {
 					if verbose {
 						fmt.Println("No new posts found, exiting...")
 					}
-					return
+					return nil
 				}
 				bar := progressbar.NewOptions(len(urls),
 					progressbar.OptionSetWidth(25),
@@ -137,7 +127,7 @@ var (
 				for result := range extractor.ExtractAllPosts(ctx, urls) {
 					select {
 					case <-ctx.Done():
-						log.Fatalln("context cancelled")
+						return ctx.Err()
 					default:
 					}
 					if result.Err != nil {
@@ -148,7 +138,6 @@ var (
 						continue
 					}
 					bar.Add(1)
-					downloadedPostsCount++
 					if verbose {
 						fmt.Printf("Downloading post %s\n", result.Post.CanonicalUrl)
 					}
@@ -159,29 +148,16 @@ var (
 						fmt.Printf("Writing post to file %s\n", path)
 					}
 
-					if downloadImages || downloadFiles {
-						imageQualityEnum := lib.ImageQuality(imageQuality)
-						// Parse file extensions if specified
-						var fileExtensionsSlice []string
-						if fileExtensions != "" {
-							fileExtensionsSlice = strings.Split(strings.ReplaceAll(fileExtensions, " ", ""), ",")
-						}
-						imageResult, err := post.WriteToFileWithImages(ctx, path, format, addSourceURL, downloadImages, imageQualityEnum, imagesDir, downloadFiles, fileExtensionsSlice, filesDir, fetcher)
-						if err != nil {
-							log.Printf("Error writing file %s: %v\n", path, err)
-						} else if verbose && imageResult.Success > 0 {
-							fmt.Printf("Downloaded %d images (%d failed) for post %s\n", imageResult.Success, imageResult.Failed, post.Slug)
+					if err := writeDownloadedPost(post, path); err != nil {
+						writeErrors = append(writeErrors, fmt.Errorf("write post %s: %w", path, err))
+						if archive != nil {
+							removeInvalidArchiveEntry(archive, path)
 						}
 					} else {
-						err = post.WriteToFile(path, format, addSourceURL)
-						if err != nil {
-							log.Printf("Error writing file %s: %v\n", path, err)
+						downloadedPostsCount++
+						if archive != nil {
+							archive.AddEntry(post, path, time.Now())
 						}
-					}
-
-					// Add to archive if enabled and post was successfully written
-					if archive != nil {
-						archive.AddEntry(post, path, time.Now())
 					}
 				}
 				if verbose {
@@ -191,11 +167,17 @@ var (
 			}
 
 			// Generate archive page if enabled
-			if archive != nil && len(archive.Entries) > 0 {
+			if archive != nil {
+				if _, err := os.Stat(outputFolder); os.IsNotExist(err) {
+					return errors.Join(writeErrors...)
+				}
+				if err := archive.SaveMetadata(outputFolder, format); err != nil {
+					return errors.Join(append(writeErrors, fmt.Errorf("save archive metadata (previous index preserved): %w", err))...)
+				}
 				if verbose {
 					fmt.Printf("Generating archive page in %s format...\n", format)
 				}
-				
+
 				var archiveErr error
 				switch format {
 				case "html":
@@ -207,13 +189,14 @@ var (
 				default:
 					archiveErr = fmt.Errorf("unknown format for archive: %s", format)
 				}
-				
+
 				if archiveErr != nil {
-					log.Printf("Error generating archive page: %v\n", archiveErr)
+					writeErrors = append(writeErrors, fmt.Errorf("publish archive (previous index preserved): %w", archiveErr))
 				} else if verbose {
 					fmt.Printf("Archive page generated: %s/index.%s\n", outputFolder, format)
 				}
 			}
+			return errors.Join(writeErrors...)
 		},
 	}
 )
@@ -291,4 +274,28 @@ func filterExistingPosts(urls []string, outputFolder string, format string) ([]s
 		}
 	}
 	return filtered, nil
+}
+
+// The same success check applies to plain posts and posts with downloaded media.
+func writeDownloadedPost(post lib.Post, path string) error {
+	if !downloadImages && !downloadFiles {
+		return post.WriteToFile(path, format, addSourceURL)
+	}
+	var extensions []string
+	if fileExtensions != "" {
+		extensions = strings.Split(strings.ReplaceAll(fileExtensions, " ", ""), ",")
+	}
+	result, err := post.WriteToFileWithImages(ctx, path, format, addSourceURL, downloadImages, lib.ImageQuality(imageQuality), imagesDir, downloadFiles, extensions, filesDir, fetcher)
+	if err == nil && verbose && result.Success > 0 {
+		fmt.Printf("Downloaded %d images (%d failed) for post %s\n", result.Success, result.Failed, post.Slug)
+	}
+	return err
+}
+
+// Atomic post writes preserve a valid prior file when replacement fails.
+func removeInvalidArchiveEntry(archive *lib.Archive, path string) {
+	info, err := os.Stat(path)
+	if err != nil || !info.Mode().IsRegular() || info.Size() == 0 {
+		archive.RemoveEntry(path)
+	}
 }

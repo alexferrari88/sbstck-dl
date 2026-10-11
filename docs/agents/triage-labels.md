@@ -12,3 +12,15 @@ Map each canonical triage role to its label in GitHub Issues.
 
 When a skill mentions a role, use the corresponding tracker label.
 Edit the Tracker label column to change the vocabulary.
+
+## Priority labels
+
+Priority is independent of category and triage state. Use one priority label per triaged issue:
+
+| Label | Meaning |
+| --- | --- |
+| priority:P1 | Core download completeness or archive integrity; address first |
+| priority:P2 | Offline completeness and workflow improvements; next |
+| priority:P3 | Deferred export or media enhancements |
+
+Record ordering within a priority and verification evidence in the issue's triage notes or agent brief. A high priority does not imply an issue is ready for implementation.

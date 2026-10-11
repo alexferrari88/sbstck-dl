@@ -1,5 +1,9 @@
 # Agent Instructions
 
+## Project worklog
+
+Read the project-level `worklog.md` before changing the project. Update it when the tracked goal, decisions, blockers, or next action changes materially, and leave it accurate at handoff.
+
 ## Finishing work
 
 At the end of every task that changes this repository, run appropriate checks, commit the completed changes, and push them to `origin` without asking for confirmation. Include only task-related changes and preserve unrelated work. For branch or worktree work, follow the integration procedure below. Verify that the pushed remote ref matches the completed commit before reporting success. If validation or pushing fails, preserve the work and report the blocker.

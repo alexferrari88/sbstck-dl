@@ -213,6 +213,12 @@ sbstck-dl download --url https://example.substack.com --download-images --downlo
 sbstck-dl download --url https://example.substack.com --create-archive --images-dir assets --files-dir attachments
 ```
 
+Each successfully downloaded local post file is indexed once; distinct saved files remain distinct entries. Archive indexes are cumulative: incremental bulk downloads and single-post downloads retain earlier local posts. Re-running with no new posts also rebuilds the selected index without fetching existing posts. HTML, Markdown, and text have separate indexes and metadata files (`.sbstck-dl-archive-html.json`, `.sbstck-dl-archive-md.json`, and `.sbstck-dl-archive-txt.json`). Keep these files with the posts to retain subtitles, descriptions, cover URLs, and download times; they contain index metadata, not post bodies.
+
+Older output folders are recovered from the downloader's root-level `YYYYMMDD_HHMMSS_slug.format` files (and `_slug.format` files for posts without valid dates). Titles come from the saved post heading; if unavailable, the filename slug is used. Publication dates come from the filename, which does not retain the original timezone; recovered timestamps use UTC. The file modification time is the fallback download time. Legacy subtitles, descriptions, and cover URLs are unavailable when they were not saved as metadata. Empty files, directories, and symlinks are excluded.
+
+Posts, archive indexes, and metadata files are published with temporary files and atomic replacement. Restoration errors stop the command before downloads and preserve the existing index. Publication and post-write errors return a nonzero exit status. Metadata is saved before the index; if index publication fails, the prior index stays intact and a later run can use the saved metadata to rebuild it. Dry runs do not write either file. Only successfully written posts are added to the current index; a failed overwrite retains the prior complete post and its index entry.
+
 **Archive Content Per Post:**
 - **Title**: Clickable link to the downloaded post file
 - **Publication Date**: When the post was originally published on Substack
