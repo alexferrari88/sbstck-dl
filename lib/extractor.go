@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -372,63 +371,6 @@ func (e *Extractor) ExtractPost(ctx context.Context, pageUrl string) (Post, erro
 }
 
 type DateFilterFunc func(string) bool
-
-func (e *Extractor) GetAllPostsURLs(ctx context.Context, pubUrl string, f DateFilterFunc) ([]string, error) {
-	u, err := url.Parse(pubUrl)
-	if err != nil {
-		return nil, err
-	}
-
-	u.Path, err = url.JoinPath(u.Path, "sitemap.xml")
-	if err != nil {
-		return nil, err
-	}
-
-	// fetch the sitemap of the publication
-	body, err := e.fetcher.FetchURL(ctx, u.String())
-	if err != nil {
-		return nil, err
-	}
-	defer body.Close()
-
-	// Parse the XML
-	doc, err := goquery.NewDocumentFromReader(body)
-	if err != nil {
-		return nil, err
-	}
-
-	// Pre-allocate a reasonable size for URLs
-	// This avoids multiple slice reallocations as we append
-	urls := make([]string, 0, 100)
-
-	doc.Find("url").EachWithBreak(func(i int, s *goquery.Selection) bool {
-		// Check if the context has been cancelled
-		select {
-		case <-ctx.Done():
-			return false
-		default:
-		}
-
-		urlSel := s.Find("loc")
-		url := urlSel.Text()
-		if !strings.Contains(url, "/p/") {
-			return true
-		}
-
-		// Only find lastmod if we have a filter
-		if f != nil {
-			lastmod := s.Find("lastmod").Text()
-			if !f(lastmod) {
-				return true
-			}
-		}
-
-		urls = append(urls, url)
-		return true
-	})
-
-	return urls, nil
-}
 
 type ExtractResult struct {
 	Post Post

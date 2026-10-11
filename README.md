@@ -52,6 +52,10 @@ You can provide the url of a single post or the main url of the Substack you wan
 
 By providing the main URL of a Substack, the downloader will download all the posts of the archive.
 
+Publication discovery first reads `/sitemap.xml`. If the sitemap is missing or unusable, it pages through the publication's public `/api/v1/archive` endpoint until an empty page. This also works with custom domains. Feeds and the initial `/archive` HTML page contain recent posts, so they are not used as complete archives. A discovery error or cancellation stops the operation rather than returning a partial archive.
+
+Date filters use sitemap `lastmod` when a valid sitemap exists and publication `post_date` for the API fallback. Existing date comparisons are unchanged; edited posts and date-only versus timestamp boundaries can produce different results between these sources. The public archive API can change, and posts added or removed during pagination can shift results; discovery is not an atomic snapshot.
+
 When downloading the full archive, if the downloader is interrupted, at the next execution it will resume the download of the remaining posts.
 
 ```bash
