@@ -36,6 +36,7 @@ gh workflow run build-release.yml --ref main -f branch=main
 This runs all three native jobs and the complete asset check, retaining binaries
 as workflow artifacts without creating a tag, draft, or public release. Do not
 dispatch the new workflow against an older source commit that lacks its scripts.
+When specifying a commit as the source, use its full 40-character SHA.
 After publication, verify the run succeeded and the release has all six assets.
 
 This workflow controls its own publication path. Repository maintainers with
