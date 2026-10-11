@@ -59,7 +59,7 @@ func TestHEICPreviewRealFixture(t *testing.T) {
 			after, err := os.Stat(r.LocalPath)
 			require.NoError(t, err)
 			require.Equal(t, info.ModTime(), after.ModTime())
-			require.Equal(t, os.FileMode(0600), after.Mode().Perm())
+			require.Equal(t, info.Mode().Perm(), after.Mode().Perm())
 			require.NoError(t, os.Remove(r.LocalPath))
 			verifyPreview(t, id.localImage(context.Background(), r.OriginalURL, path), data)
 		})
@@ -74,6 +74,8 @@ func TestHEICPreviewFailureAndRetry(t *testing.T) {
 	old, err := os.ReadFile(good.LocalPath)
 	require.NoError(t, err)
 	require.NoError(t, os.Chmod(path, 0600))
+	before, err := os.Stat(path)
+	require.NoError(t, err)
 	bad := id.saveImage(context.Background(), good.OriginalURL, path, bytes.NewReader([]byte("corrupt HEIC")))
 	require.False(t, bad.Success)
 	require.Error(t, bad.Error)
@@ -88,7 +90,7 @@ func TestHEICPreviewFailureAndRetry(t *testing.T) {
 	require.True(t, os.IsNotExist(err))
 	info, err := os.Stat(path)
 	require.NoError(t, err)
-	require.Equal(t, os.FileMode(0600), info.Mode().Perm())
+	require.Equal(t, before.Mode().Perm(), info.Mode().Perm())
 	verifyPreview(t, id.saveImage(context.Background(), good.OriginalURL, path, bytes.NewReader(data)), data)
 }
 func TestHEICPreviewPortableBytesAndCollision(t *testing.T) {
