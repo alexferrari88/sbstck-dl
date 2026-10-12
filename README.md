@@ -65,6 +65,8 @@ Date filters use sitemap `lastmod` when a valid sitemap exists and publication `
 
 When downloading the full archive, if the downloader is interrupted, at the next execution it will resume the download of the remaining posts.
 
+With `--download-podcasts` or `--download-videos`, posts that were already downloaded are revisited to fetch their media, without rewriting the post files. This lets you add media to an existing download. Which posts' media is complete is recorded in `.sbstck-dl-media.json` in the output directory, so later runs only revisit posts with media still missing: previews, failed downloads, deleted files, and paywalled posts checked without a cookie (Substack may hide their media). Delete that file to have every post checked again.
+
 ```bash
 Usage:
   sbstck-dl download [flags]
@@ -74,6 +76,8 @@ Flags:
       --create-archive         Create an archive index page linking all downloaded posts
       --download-files         Download file attachments locally and update content to reference local files
       --download-images        Download images locally and update content to reference local files
+      --download-podcasts      Download podcast episode audio (MP3) for podcast posts
+      --download-videos        Download Substack-hosted videos (MP4) of video posts and videos embedded in posts
   -d, --dry-run                Enable dry run
       --file-extensions string Comma-separated list of file extensions to download (e.g., 'pdf,docx,txt'). If empty, downloads all file types
       --files-dir string       Directory name for downloaded file attachments (default "files")
@@ -82,7 +86,9 @@ Flags:
       --image-quality string   Image quality to download (options: "high", "medium", "low") (default "high")
       --images-dir string      Directory name for downloaded images (default "images")
   -o, --output string          Specify the download directory (default ".")
+      --podcasts-dir string    Directory name for downloaded podcast audio (default "podcasts")
   -u, --url string             Specify the Substack url
+      --videos-dir string      Directory name for downloaded videos (default "videos")
 
 Global Flags:
       --after string    Download posts published after this date (format: YYYY-MM-DD)
@@ -205,6 +211,72 @@ output/
         ├── document.pdf
         ├── spreadsheet.xlsx
         └── presentation.pptx
+```
+
+#### Downloading Podcasts
+
+Use the `--download-podcasts` flag to download the audio of podcast episodes as MP3 files. Posts without podcast audio are left alone.
+
+**Features:**
+- Saves audio as `{output}/podcasts/{post-file-name}.mp3`, next to the matching post file. Podcasts hosted outside Substack keep their format, e.g. `.m4a` or `.ogg`
+- Embeds an audio player in HTML posts, below the title, playing the downloaded file. Markdown posts get a link to the audio instead
+- Skips episodes that were already downloaded, including in posts downloaded by earlier runs. HTML posts downloaded by earlier runs get the player added, leaving the rest of the file as it is
+- Retries failed and stalled downloads, resuming where they stopped. Interrupted downloads are kept as `.part` files and resumed on the next run
+- Downloads paid episodes when you pass a paid subscriber's cookie (see [Private Newsletters](#private-newsletters))
+
+Without a paid subscriber cookie, or with an expired one, Substack only serves a free preview of paid episodes. When that happens, sbstck-dl prints a warning and saves the preview as `{post-file-name}_preview.mp3`. If you run it again with a valid cookie, it still downloads the full episode. Previews are recognized by comparing the downloaded file's own duration with the full episode's length. Some publications serve no preview of paid episodes at all; then sbstck-dl warns that the audio is not available.
+
+**Examples:**
+
+```bash
+# Download all posts along with podcast audio
+sbstck-dl download --url https://example.substack.com --download-podcasts
+
+# Download paid episodes in full
+sbstck-dl download --url https://example.substack.com --download-podcasts --cookie_name substack.sid --cookie_val COOKIE_VALUE
+
+# Download a single episode into a custom directory
+sbstck-dl download --url https://example.substack.com/p/episode-title --download-podcasts --podcasts-dir audio
+```
+
+**Directory Structure with Podcasts:**
+```
+output/
+├── 20231201_120000_episode-title.html
+└── podcasts/
+    └── 20231201_120000_episode-title.mp3
+```
+
+#### Downloading Videos
+
+Use the `--download-videos` flag to download Substack-hosted videos as MP4 files. This covers both the video of a video post and native videos embedded in a post's body. Third-party embeds, such as YouTube videos, are not downloaded (use a tool like `yt-dlp` for those).
+
+**Features:**
+- Saves the post's own video as `{output}/videos/{post-file-name}.mp4` and embedded videos as `{post-file-name}_video-{id}.mp4`, where `{id}` identifies the video, so names don't change if the post's videos are reordered
+- Embeds the downloaded videos in HTML posts, where they play from the local files. The post's own video goes below the title, embedded videos where they appear in the post. Markdown posts get a link to each video instead
+- Skips videos that were already downloaded, including in posts downloaded by earlier runs. HTML posts downloaded by earlier runs get their videos embedded, leaving the rest of the file as it is
+- Retries failed and stalled downloads, resuming where they stopped, also across runs
+- Downloads paid videos in full when you pass a paid subscriber's cookie. The cookie is only sent to Substack, never to the video CDN
+
+As with podcasts, without a paid subscriber cookie Substack only serves a free preview of paid videos. When that happens, sbstck-dl prints a warning and saves the preview with a `_preview` suffix, so a later run with a cookie still downloads the full video.
+
+**Examples:**
+
+```bash
+# Download all posts along with their videos
+sbstck-dl download --url https://example.substack.com --download-videos
+
+# Download video and audio of paid episodes in full
+sbstck-dl download --url https://example.substack.com --download-videos --download-podcasts --cookie_name substack.sid --cookie_val COOKIE_VALUE
+```
+
+**Directory Structure with Videos:**
+```
+output/
+├── 20231201_120000_episode-title.html
+└── videos/
+    ├── 20231201_120000_episode-title.mp4
+    └── 20231201_120000_episode-title_video-d162532c.mp4
 ```
 
 #### Creating Archive Index Pages

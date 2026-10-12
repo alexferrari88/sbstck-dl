@@ -34,35 +34,41 @@ func (r *RawPost) ToPost() (Post, error) {
 
 // Post represents a structured Substack post with various fields.
 type Post struct {
-	Id               int    `json:"id"`
-	PublicationId    int    `json:"publication_id"`
-	Type             string `json:"type"`
-	Slug             string `json:"slug"`
-	PostDate         string `json:"post_date"`
-	CanonicalUrl     string `json:"canonical_url"`
-	PreviousPostSlug string `json:"previous_post_slug"`
-	NextPostSlug     string `json:"next_post_slug"`
-	CoverImage       string `json:"cover_image"`
-	Description      string `json:"description"`
-	Subtitle         string `json:"subtitle,omitempty"`
-	WordCount        int    `json:"wordcount"`
+	Id               int          `json:"id"`
+	PublicationId    int          `json:"publication_id"`
+	Type             string       `json:"type"`
+	Slug             string       `json:"slug"`
+	PostDate         string       `json:"post_date"`
+	CanonicalUrl     string       `json:"canonical_url"`
+	PreviousPostSlug string       `json:"previous_post_slug"`
+	NextPostSlug     string       `json:"next_post_slug"`
+	CoverImage       string       `json:"cover_image"`
+	Description      string       `json:"description"`
+	Subtitle         string       `json:"subtitle,omitempty"`
+	WordCount        int          `json:"wordcount"`
 	Title            string       `json:"title"`
 	BodyHTML         string       `json:"body_html"`
 	PodcastUrl       string       `json:"podcast_url,omitempty"`
 	VideoUpload      *VideoUpload `json:"videoUpload,omitempty"`
 	PodcastUpload    *AudioUpload `json:"podcastUpload,omitempty"`
 	VoiceoverUpload  *AudioUpload `json:"voiceoverUpload,omitempty"`
+	Audience         string       `json:"audience,omitempty"`
+	PodcastDuration  float64      `json:"podcast_duration,omitempty"`
+	VideoUploadId    string       `json:"video_upload_id,omitempty"`
 }
 
 type VideoUpload struct {
-	Id             string       `json:"id"`
-	Duration       float64      `json:"duration"`
-	ExtractedAudio *AudioUpload `json:"extractedAudio,omitempty"`
+	Id                   string       `json:"id"`
+	Duration             float64      `json:"duration"`
+	ExtractedAudio       *AudioUpload `json:"extractedAudio,omitempty"`
+	MuxPreviewPlaybackID string       `json:"mux_preview_playback_id,omitempty"`
 }
 
 type AudioUpload struct {
-	Id       string  `json:"id"`
-	Duration float64 `json:"duration"`
+	Id              string           `json:"id"`
+	Duration        float64          `json:"duration"`
+	IsFreePreview   bool             `json:"is_free_preview,omitempty"`
+	FullPodcastInfo *FullPodcastInfo `json:"full_podcast_info,omitempty"`
 }
 
 // Static converter instance to avoid recreating it for each conversion

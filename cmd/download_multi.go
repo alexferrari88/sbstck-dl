@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -180,6 +181,16 @@ func runDownload(cmd *cobra.Command, args []string) error {
 		fmt.Printf("Found %d posts\nDry run, exiting...\n", len(urls))
 		return nil
 	}
+	// The media manifest records posts whose media is complete, so later runs
+	// can skip them
+	var manifest *lib.MediaManifest
+	if downloadPodcasts || downloadVideos {
+		manifest, err = lib.LoadMediaManifest(outputFolder)
+		if err != nil {
+			fmt.Fprintf(cmd.ErrOrStderr(), "Warning: ignoring unreadable media manifest: %v\n", err)
+			manifest = lib.NewMediaManifest(outputFolder)
+		}
+	}
 	inventory := make(map[string]map[string]bool)
 	if !single {
 		inventory, err = existingPostInventory(outputFolder)
@@ -194,7 +205,10 @@ func runDownload(cmd *cobra.Command, args []string) error {
 					complete = false
 				}
 			}
-			if !complete {
+			// Posts already downloaded are revisited for media that isn't
+			// complete yet according to the manifest, so media can be added
+			// to an existing download.
+			if !complete || (manifest != nil && postNeedsMedia(manifest, extractSlug(url))) {
 				needed = append(needed, url)
 			}
 		}
@@ -235,6 +249,22 @@ func runDownload(cmd *cobra.Command, args []string) error {
 				missing = append(missing, selected)
 			}
 		}
+		// Media files share the base name of the post files
+		mediaPath := makePath(post, outputFolder, formats[0])
+		var media lib.EmbeddedMedia
+		if manifest != nil {
+			if verbose && len(missing) == 0 {
+				fmt.Printf("Post already downloaded, only downloading media: %s\n", post.Slug)
+			}
+			media = downloadPostMedia(manifest, post, mediaPath)
+			// HTML written by an earlier run gets the media embedded in place
+			if inventory[post.Slug]["html"] && !slices.Contains(missing, "html") {
+				htmlPath := makePath(post, outputFolder, "html")
+				if err := embedMediaInFile(htmlPath, post, media); err != nil {
+					failures = append(failures, fmt.Errorf("embed media in %s: %w", htmlPath, err))
+				}
+			}
+		}
 		if len(missing) == 0 {
 			continue
 		}
@@ -252,6 +282,7 @@ func runDownload(cmd *cobra.Command, args []string) error {
 			failures = append(failures, fmt.Errorf("write post %s: %w", post.Slug, mediaErr))
 			continue
 		}
+		prepared.BodyHTML = lib.EmbedMedia(prepared.BodyHTML, post.VideoUploadId, media)
 		postWritten := false
 		var writes []lib.ArchivePostWrite
 		for _, selected := range missing {
