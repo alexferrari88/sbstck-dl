@@ -2,6 +2,7 @@ package lib
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -224,24 +225,8 @@ func (f *Fetcher) FetchURLs(ctx context.Context, urls []string) <-chan FetchResu
 
 // FetchURL fetches the specified URL with retries and rate limiting.
 func (f *Fetcher) FetchURL(ctx context.Context, url string) (io.ReadCloser, error) {
-	requestBackoff := f.BackoffCfg
-	switch cfg := requestBackoff.(type) {
-	case *backoff.ExponentialBackOff:
-		// RetryNotify resets and advances its policy. Keep the configured
-		// template untouched so each request has an independent schedule.
-		copy := *cfg
-		requestBackoff = &copy
-	case *backoff.ConstantBackOff:
-		copy := *cfg
-		requestBackoff = &copy
-	case *backoff.ZeroBackOff, *backoff.StopBackOff:
-		// These policies have no mutable retry state.
-	default:
-		// BackOff does not expose a clone operation. Preserve custom policies
-		// by protecting their entire retry loop, including resets and waits.
-		f.backoffMu.Lock()
-		defer f.backoffMu.Unlock()
-	}
+	requestBackoff, release := f.requestBackOff()
+	defer release()
 
 	var body io.ReadCloser
 	var err error
@@ -327,6 +312,102 @@ func (f *Fetcher) fetch(ctx context.Context, url string) (io.ReadCloser, error) 
 	}
 
 	return res.Body, nil
+}
+
+// ResolveRedirect requests the URL without following redirects and returns the
+// redirect target, or the URL itself if the response is not a redirect.
+// Rate limiting (429), server errors and network errors are retried.
+func (f *Fetcher) ResolveRedirect(ctx context.Context, url string) (string, error) {
+	var location string
+	var retryCounter int
+
+	operation := func() error {
+		if retryCounter >= defaultMaxRetryCount {
+			return backoff.Permanent(fmt.Errorf("max retry count reached for URL: %s", url))
+		}
+
+		if err := f.RateLimiter.Wait(ctx); err != nil {
+			return backoff.Permanent(err)
+		}
+
+		var err error
+		location, err = f.resolveRedirect(ctx, url)
+		if err == nil {
+			return nil
+		}
+		if ctx.Err() != nil {
+			return backoff.Permanent(ctx.Err())
+		}
+		var fetchErr *FetchError
+		if errors.As(err, &fetchErr) && fetchErr.StatusCode != http.StatusTooManyRequests && fetchErr.StatusCode < 500 {
+			return backoff.Permanent(err)
+		}
+		retryCounter++
+		return err
+	}
+
+	requestBackoff, release := f.requestBackOff()
+	defer release()
+	err := backoff.Retry(operation, backoff.WithContext(requestBackoff, ctx))
+	return location, err
+}
+
+// resolveRedirect makes a single request for ResolveRedirect.
+func (f *Fetcher) resolveRedirect(ctx context.Context, url string) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("User-Agent", userAgent)
+	if f.Cookie != nil {
+		req.AddCookie(f.Cookie)
+	}
+
+	client := *f.Client
+	client.CheckRedirect = func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	res, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer res.Body.Close()
+
+	switch {
+	case res.StatusCode >= 300 && res.StatusCode < 400:
+		location, err := res.Location()
+		if err != nil {
+			return "", fmt.Errorf("redirect without location: %w", err)
+		}
+		return location.String(), nil
+	case res.StatusCode == http.StatusOK:
+		return url, nil
+	default:
+		return "", &FetchError{StatusCode: res.StatusCode}
+	}
+}
+
+// requestBackOff returns the backoff to use for one request, and a function
+// to call when the request is done.
+func (f *Fetcher) requestBackOff() (backoff.BackOff, func()) {
+	switch cfg := f.BackoffCfg.(type) {
+	case *backoff.ExponentialBackOff:
+		// Retries reset and advance their policy. Keep the configured
+		// template untouched so each request has an independent schedule.
+		copy := *cfg
+		return &copy, func() {}
+	case *backoff.ConstantBackOff:
+		copy := *cfg
+		return &copy, func() {}
+	case *backoff.ZeroBackOff, *backoff.StopBackOff:
+		// These policies have no mutable retry state.
+		return cfg, func() {}
+	default:
+		// BackOff does not expose a clone operation. Preserve custom policies
+		// by protecting their entire retry loop, including resets and waits.
+		f.backoffMu.Lock()
+		return f.BackoffCfg, f.backoffMu.Unlock
+	}
 }
 
 // makeDefaultBackoff creates the default exponential backoff configuration.

@@ -48,6 +48,15 @@ type Post struct {
 	WordCount        int    `json:"wordcount"`
 	Title            string `json:"title"`
 	BodyHTML         string `json:"body_html"`
+
+	// Who can read the post: "everyone", or e.g. "only_paid" for paywalled posts
+	Audience string `json:"audience,omitempty"`
+
+	// Media fields, only set for podcast and video posts
+	PodcastURL      string         `json:"podcast_url,omitempty"`
+	PodcastDuration float64        `json:"podcast_duration,omitempty"`
+	PodcastUpload   *PodcastUpload `json:"podcastUpload,omitempty"`
+	VideoUploadId   string         `json:"video_upload_id,omitempty"`
 }
 
 // Static converter instance to avoid recreating it for each conversion
