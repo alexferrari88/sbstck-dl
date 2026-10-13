@@ -34,10 +34,11 @@ Usage:
   sbstck-dl [command]
 
 Available Commands:
-  download    Download individual posts or the entire public archive
-  help        Help about any command
-  list        List the posts of a Substack
-  version     Print the version number of sbstck-dl
+  download             Download individual posts or the entire public archive
+  help                 Help about any command
+  list                 List the posts of a Substack
+  update-archive-page  Rebuild an archive index from local posts without downloading
+  version              Print the version number of sbstck-dl
 
 Flags:
       --after string             Download posts published after this date (format: YYYY-MM-DD)
@@ -281,6 +282,26 @@ output/
     └── another-post/
         └── spreadsheet.xlsx
 ```
+
+### Rebuilding an archive index offline
+
+Use `update-archive-page` to rebuild an index from an existing local archive. It requires no URL or network connection and does not download posts or covers or change post bodies.
+
+```bash
+# Rebuild index.html in the current directory (the default)
+sbstck-dl update-archive-page
+
+# Rebuild one selected format in an existing archive directory
+sbstck-dl update-archive-page --output ./output --format html
+sbstck-dl update-archive-page -o ./output -f md
+sbstck-dl update-archive-page -o ./output -f txt
+```
+
+Choose one format per invocation: `html` (default), `md`, or `txt`. The command reports the generated `index.{format}` path. Newly added local posts are discovered using the same filename rules as downloaded archives, and deleted posts disappear from the selected index. An existing directory with no remaining posts gets an empty index, clearing stale links.
+
+Keep the selected `.sbstck-dl-archive-{format}.json` manifest alongside the posts to preserve titles, publication and download times, subtitles, descriptions, and cover references. Relative local cover paths remain usable when the archive folder is moved with its assets. Legacy posts without manifests use the restoration rules described above, including files with unknown publication dates.
+
+Unsupported formats, missing or unreadable directories, corrupt metadata, unreadable eligible legacy posts, and publication failures return a nonzero exit status and preserve the previous index. Metadata is saved before the index; if index publication fails, the saved metadata remains available for a later rebuild. Unrelated files, empty files, directories, and symlinks remain excluded according to the existing archive restoration rules.
 
 ### Listing posts
 
