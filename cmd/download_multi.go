@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -147,6 +148,32 @@ func existingPostInventory(folder string) (map[string]map[string]bool, error) {
 	return inventory, nil
 }
 
+// Resolve the actual inventoried filename, including legacy/changed dates.
+// Updating all matching HTML copies avoids certifying stale local players.
+func existingHTMLPaths(folder, slug string) ([]string, error) {
+	entries, err := os.ReadDir(folder)
+	if err != nil {
+		return nil, fmt.Errorf("inspect HTML for %s: %w", slug, err)
+	}
+	var paths []string
+	for _, entry := range entries {
+		match := localPostName.FindStringSubmatch(entry.Name())
+		if match != nil && match[2] == slug && match[3] == "html" && entry.Type().IsRegular() {
+			info, err := entry.Info()
+			if err != nil {
+				return nil, err
+			}
+			if info.Size() > 0 {
+				paths = append(paths, filepath.Join(folder, entry.Name()))
+			}
+		}
+	}
+	if len(paths) == 0 {
+		return nil, fmt.Errorf("existing HTML for %s disappeared", slug)
+	}
+	return paths, nil
+}
+
 func runDownload(cmd *cobra.Command, args []string) error {
 	if len(args) != 0 {
 		return cobra.NoArgs(cmd, args)
@@ -187,8 +214,7 @@ func runDownload(cmd *cobra.Command, args []string) error {
 	if downloadPodcasts || downloadVideos {
 		manifest, err = lib.LoadMediaManifest(outputFolder)
 		if err != nil {
-			fmt.Fprintf(cmd.ErrOrStderr(), "Warning: ignoring unreadable media manifest: %v\n", err)
-			manifest = lib.NewMediaManifest(outputFolder)
+			return fmt.Errorf("load media manifest: %w", err)
 		}
 	}
 	inventory := make(map[string]map[string]bool)
@@ -234,6 +260,9 @@ func runDownload(cmd *cobra.Command, args []string) error {
 			if verbose {
 				fmt.Fprintf(cmd.ErrOrStderr(), "Error downloading post: %v\n", result.Err)
 			}
+			if manifest != nil {
+				failures = append(failures, fmt.Errorf("download post: %w", result.Err))
+			}
 			continue
 		}
 		if bar != nil {
@@ -252,20 +281,35 @@ func runDownload(cmd *cobra.Command, args []string) error {
 		// Media files share the base name of the post files
 		mediaPath := makePath(post, outputFolder, formats[0])
 		var media lib.EmbeddedMedia
+		var mediaStatus postMedia
+		outputsOK := true
 		if manifest != nil {
 			if verbose && len(missing) == 0 {
 				fmt.Printf("Post already downloaded, only downloading media: %s\n", post.Slug)
 			}
-			media = downloadPostMedia(manifest, post, mediaPath)
+			var mediaErr error
+			mediaStatus, mediaErr = downloadPostMedia(manifest, post, mediaPath)
+			media = mediaStatus.embedded
+			failures = append(failures, mediaErr)
 			// HTML written by an earlier run gets the media embedded in place
 			if inventory[post.Slug]["html"] && !slices.Contains(missing, "html") {
-				htmlPath := makePath(post, outputFolder, "html")
-				if err := embedMediaInFile(htmlPath, post, media); err != nil {
-					failures = append(failures, fmt.Errorf("embed media in %s: %w", htmlPath, err))
+				paths, pathErr := existingHTMLPaths(outputFolder, post.Slug)
+				if pathErr != nil {
+					failures = append(failures, pathErr)
+					outputsOK = false
+				}
+				for _, htmlPath := range paths {
+					if err := embedMediaInFile(htmlPath, post, media); err != nil {
+						failures = append(failures, fmt.Errorf("embed media in %s: %w", htmlPath, err))
+						outputsOK = false
+					}
 				}
 			}
 		}
 		if len(missing) == 0 {
+			if outputsOK && manifest != nil {
+				failures = append(failures, completePostMedia(manifest, post, mediaStatus))
+			}
 			continue
 		}
 		filesSupported := false
@@ -282,7 +326,7 @@ func runDownload(cmd *cobra.Command, args []string) error {
 			failures = append(failures, fmt.Errorf("write post %s: %w", post.Slug, mediaErr))
 			continue
 		}
-		prepared.BodyHTML = lib.EmbedMedia(prepared.BodyHTML, post.VideoUploadId, media)
+		prepared.BodyHTML = lib.EmbedMedia(prepared.BodyHTML, postVideoID(post), media)
 		postWritten := false
 		var writes []lib.ArchivePostWrite
 		for _, selected := range missing {
@@ -297,6 +341,7 @@ func runDownload(cmd *cobra.Command, args []string) error {
 			writeErr := output.WriteToFile(path, selected, addSourceURL)
 			writes = append(writes, lib.ArchivePostWrite{Format: selected, Path: path, DownloadTime: time.Now(), Err: writeErr})
 			if writeErr != nil {
+				outputsOK = false
 				failures = append(failures, fmt.Errorf("write post %s: %w", path, writeErr))
 			} else {
 				postWritten = true
@@ -305,6 +350,9 @@ func runDownload(cmd *cobra.Command, args []string) error {
 				}
 				inventory[post.Slug][selected] = true
 			}
+		}
+		if outputsOK && manifest != nil {
+			failures = append(failures, completePostMedia(manifest, post, mediaStatus))
 		}
 		if archiveWorkflow != nil {
 			archiveWorkflow.RecordPost(post, images, writes)

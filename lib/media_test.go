@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -151,9 +152,11 @@ func TestParseContentRange(t *testing.T) {
 }
 
 func TestMediaSourceKey(t *testing.T) {
-	assert.Equal(t,
-		"https://stream.mux.com/abc/high.mp4",
-		mediaSourceKey("https://stream.mux.com/abc/high.mp4?token=xyz"))
+	first := mediaSourceKey("https://stream.mux.com/abc/high.mp4?token=secret&episode=A")
+	assert.NotContains(t, first, "secret")
+	assert.Equal(t, first, mediaSourceKey("https://stream.mux.com/abc/high.mp4?token=secret&episode=A"))
+	assert.NotEqual(t, first, mediaSourceKey("https://stream.mux.com/abc/high.mp4?token=secret&episode=B"))
+	assert.NotEqual(t, first, mediaSourceKey("https://stream.mux.com/abc/high.mp4?token=rotated&episode=A"))
 }
 
 // fastMediaRetries makes media download retries immediate for the test.
@@ -182,6 +185,7 @@ func newMediaServer(t *testing.T, content []byte) *mediaServer {
 		case "/src":
 			http.Redirect(w, r, "/cdn/file?token=signed", http.StatusTemporaryRedirect)
 		case "/cdn/file":
+			w.Header().Set("ETag", `"fixture-content-v1"`)
 			s.mu.Lock()
 			s.ranges = append(s.ranges, r.Header.Get("Range"))
 			n := len(s.ranges)
@@ -317,7 +321,7 @@ func TestMediaDownloadResume(t *testing.T) {
 		server := newMediaServer(t, content)
 		partPath := filepath.Join(t.TempDir(), "f.part")
 		require.NoError(t, os.WriteFile(partPath, content[:half], 0644))
-		require.NoError(t, os.WriteFile(partPath+".src", []byte(server.URL+"/cdn/file"), 0644))
+		require.NoError(t, os.WriteFile(partPath+".src", mediaSourceFixture(server.URL+"/cdn/file?token=signed"), 0644))
 
 		_, err := download(t, server, partPath)
 		require.NoError(t, err)
@@ -358,7 +362,7 @@ func TestMediaDownloadResume(t *testing.T) {
 		}
 		partPath := filepath.Join(t.TempDir(), "f.part")
 		require.NoError(t, os.WriteFile(partPath, content[:half], 0644))
-		require.NoError(t, os.WriteFile(partPath+".src", []byte(server.URL+"/cdn/file"), 0644))
+		require.NoError(t, os.WriteFile(partPath+".src", mediaSourceFixture(server.URL+"/cdn/file?token=signed"), 0644))
 
 		_, err := download(t, server, partPath)
 		require.NoError(t, err)
@@ -370,7 +374,7 @@ func TestMediaDownloadResume(t *testing.T) {
 		server := newMediaServer(t, content)
 		partPath := filepath.Join(t.TempDir(), "f.part")
 		require.NoError(t, os.WriteFile(partPath, content, 0644))
-		require.NoError(t, os.WriteFile(partPath+".src", []byte(server.URL+"/cdn/file"), 0644))
+		require.NoError(t, os.WriteFile(partPath+".src", mediaSourceFixture(server.URL+"/cdn/file?token=signed"), 0644))
 
 		size, err := download(t, server, partPath)
 		require.NoError(t, err)
@@ -555,4 +559,9 @@ func TestFetcherRequestBackOffIsPerRequest(t *testing.T) {
 	releaseB()
 	assert.NotSame(t, a, b)
 	assert.NotSame(t, fetcher.BackoffCfg, a)
+}
+
+func mediaSourceFixture(rawURL string) []byte {
+	data, _ := json.Marshal(mediaSource{SourceDigest: mediaSourceKey(rawURL), ETag: `"fixture-content-v1"`})
+	return data
 }

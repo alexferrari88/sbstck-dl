@@ -1,10 +1,10 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"net/url"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -138,69 +138,96 @@ func writeDownloadedPost(post lib.Post, path string) (*lib.ImageDownloadResult, 
 	return result, err
 }
 
-// downloadPostMedia downloads the post's podcast and videos as requested by
-// the flags, and records the outcome in the media manifest, if any. It
-// returns the downloaded media to embed in the post.
-func downloadPostMedia(manifest *lib.MediaManifest, post lib.Post, postPath string) (media lib.EmbeddedMedia) {
+// postMedia keeps download status pending until every relevant post output has
+// been published. Retained bytes can then be reused when publication is retried.
+type postMedia struct {
+	embedded lib.EmbeddedMedia
+	outcomes []mediaOutcome
+	staged   bool
+}
+
+type mediaOutcome struct {
+	kind     string
+	complete bool
+	files    []string
+}
+
+func downloadPostMedia(manifest *lib.MediaManifest, post lib.Post, postPath string) (status postMedia, err error) {
+	// Invalidate byte-only completion before repairing a missing/empty cache.
+	// Otherwise a repaired file could make the old complete record look valid
+	// if pending publication or its manifest save subsequently fails.
 	if downloadPodcasts {
-		var complete bool
-		var files []string
-		complete, files, media.Podcast = downloadPostPodcast(post, postPath)
-		recordMedia(manifest, post, lib.MediaPodcast, complete, files)
+		manifest.Record(post.Slug, lib.MediaPodcast, false, nil)
 	}
 	if downloadVideos {
-		var complete bool
-		var files []string
-		complete, files, media.Videos = downloadPostVideos(post, postPath)
-		recordMedia(manifest, post, lib.MediaVideos, complete, files)
+		manifest.Record(post.Slug, lib.MediaVideos, false, nil)
 	}
-	return media
+	if saveErr := manifest.Save(); saveErr != nil {
+		return status, fmt.Errorf("save pending media for %s before download: %w", post.Slug, saveErr)
+	}
+	var failures []error
+	if downloadPodcasts {
+		complete, files, src, downloadErr := downloadPostPodcast(post, postPath)
+		status.embedded.Podcast = src
+		status.outcomes = append(status.outcomes, mediaOutcome{lib.MediaPodcast, complete, files})
+		failures = append(failures, downloadErr)
+	}
+	if downloadVideos {
+		complete, files, srcs, downloadErr := downloadPostVideos(post, postPath)
+		status.embedded.Videos = srcs
+		status.outcomes = append(status.outcomes, mediaOutcome{lib.MediaVideos, complete, files})
+		failures = append(failures, downloadErr)
+	}
+	// Persist pending output work before touching existing or new post files.
+	for _, outcome := range status.outcomes {
+		manifest.Record(post.Slug, outcome.kind, false, outcome.files)
+	}
+	if saveErr := manifest.Save(); saveErr != nil {
+		failures = append(failures, fmt.Errorf("save pending media for %s: %w", post.Slug, saveErr))
+	} else {
+		status.staged = true
+	}
+	return status, errors.Join(failures...)
 }
 
-// embedMediaInFile embeds downloaded media in an HTML post file written by an
-// earlier run. Only the media elements are changed, so other edits to the
-// file are kept.
+func postVideoID(post lib.Post) string {
+	if post.VideoUploadId != "" {
+		return post.VideoUploadId
+	}
+	if post.VideoUpload != nil {
+		return post.VideoUpload.Id
+	}
+	return ""
+}
+
+// Embed through the library's failure-safe publication contract, preserving
+// unrelated edits and the existing file mode.
 func embedMediaInFile(path string, post lib.Post, media lib.EmbeddedMedia) error {
-	if media.Podcast == "" && len(media.Videos) == 0 {
-		return nil
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return err
-	}
-	content := string(data)
-	// The podcast and the post's own video go after the title heading
-	var title string
-	if i := strings.Index(content, "</h1>"); i >= 0 {
-		rest := strings.TrimLeft(content[i+len("</h1>"):], "\n")
-		title, content = content[:len(content)-len(rest)], rest
-	}
-	updated := title + lib.EmbedMedia(content, post.VideoUploadId, media)
-	if updated == string(data) {
-		return nil
-	}
-	return os.WriteFile(path, []byte(updated), 0644)
+	return lib.EmbedMediaInFile(path, postVideoID(post), media)
 }
 
-// recordMedia records a media download outcome in the manifest and saves it.
-// Without a cookie, Substack may withhold a paywalled post's media without any
-// sign of it, so such posts aren't recorded as complete. The exception is a
-// podcast downloaded in full: a post has only one.
-func recordMedia(manifest *lib.MediaManifest, post lib.Post, kind string, complete bool, files []string) {
-	if manifest == nil {
-		return
+func completePostMedia(manifest *lib.MediaManifest, post lib.Post, status postMedia) error {
+	if !status.staged {
+		return nil
 	}
-	podcastDownloaded := kind == lib.MediaPodcast && len(files) > 0
-	if post.IsPaywalled() && idCookieVal == "" && !podcastDownloaded {
-		complete = false
+	for _, outcome := range status.outcomes {
+		complete := outcome.complete
+		// Without a cookie, paywalled posts can hide media entirely. A full
+		// podcast is the exception, because each post has only one episode.
+		if post.IsPaywalled() && idCookieVal == "" && !(outcome.kind == lib.MediaPodcast && len(outcome.files) > 0) {
+			complete = false
+		}
+		manifest.Record(post.Slug, outcome.kind, complete, outcome.files)
 	}
-	manifest.Record(post.Slug, kind, complete, files)
 	if err := manifest.Save(); err != nil {
-		log.Printf("Error saving media manifest: %v\n", err)
+		// Keep in-memory filtering retryable as well as the previously persisted
+		// pending records when atomic publication fails.
+		for _, outcome := range status.outcomes {
+			manifest.Record(post.Slug, outcome.kind, false, outcome.files)
+		}
+		return fmt.Errorf("save completed media for %s: %w", post.Slug, err)
 	}
+	return nil
 }
 
 // postNeedsMedia reports whether an already downloaded post must be fetched
@@ -214,22 +241,21 @@ func postNeedsMedia(manifest *lib.MediaManifest, slug string) bool {
 // The audio file shares the post file's base name. It returns whether there is
 // nothing left to download, the downloaded file, and its source relative to
 // the post file.
-func downloadPostPodcast(post lib.Post, postPath string) (complete bool, files []string, src string) {
+func downloadPostPodcast(post lib.Post, postPath string) (complete bool, files []string, src string, err error) {
 	if post.IsPodcastUnavailable() {
 		log.Printf("Warning: the podcast audio for post %s is not available (paid episode); "+
 			"pass --cookie_name/--cookie_val of a paid subscription to download it\n", post.Slug)
-		return false, nil, ""
+		return false, nil, "", nil
 	}
 	if !post.HasPodcast() {
-		return true, nil, ""
+		return true, nil, "", nil
 	}
 
 	baseName := strings.TrimSuffix(filepath.Base(postPath), filepath.Ext(postPath))
 	podcastDownloader := lib.NewPodcastDownloader(fetcher, filepath.Dir(postPath), podcastsDir)
 	result, err := podcastDownloader.DownloadPodcast(ctx, post, baseName)
 	if err != nil {
-		log.Printf("Error downloading podcast for post %s: %v\n", post.Slug, err)
-		return false, nil, ""
+		return false, nil, "", fmt.Errorf("download podcast for %s: %w", post.Slug, err)
 	}
 
 	if result.Preview {
@@ -243,27 +269,27 @@ func downloadPostPodcast(post lib.Post, postPath string) (complete bool, files [
 			fmt.Printf("Downloaded podcast (%.1f MB) to %s\n", float64(result.Size)/1e6, result.LocalPath)
 		}
 	}
-	return !result.Preview, []string{result.LocalPath}, result.Source(filepath.Dir(postPath))
+	return !result.Preview, []string{result.LocalPath}, result.Source(filepath.Dir(postPath)), nil
 }
 
 // downloadPostVideos downloads the post's Substack-hosted videos next to the
 // post file. The video files share the post file's base name. It returns
 // whether there is nothing left to download, the downloaded files, and their
 // sources relative to the post file.
-func downloadPostVideos(post lib.Post, postPath string) (complete bool, files []string, srcs map[string]string) {
+func downloadPostVideos(post lib.Post, postPath string) (complete bool, files []string, srcs map[string]string, err error) {
 	baseName := strings.TrimSuffix(filepath.Base(postPath), filepath.Ext(postPath))
 	videoDownloader := lib.NewVideoDownloader(fetcher, filepath.Dir(postPath), videosDir)
 	result, err := videoDownloader.DownloadVideos(ctx, post, baseName)
 	if err != nil {
-		log.Printf("Error downloading videos for post %s: %v\n", post.Slug, err)
-		return false, nil, nil
+		return false, nil, nil, fmt.Errorf("download videos for %s: %w", post.Slug, err)
 	}
 
+	var failures []error
 	complete = true
 	for _, video := range result.Videos {
 		switch {
 		case video.Error != nil:
-			log.Printf("Error downloading video %s for post %s: %v\n", video.UploadID, post.Slug, video.Error)
+			failures = append(failures, fmt.Errorf("download video %s for %s: %w", video.UploadID, post.Slug, video.Error))
 			complete = false
 			continue
 		case video.Preview:
@@ -280,5 +306,5 @@ func downloadPostVideos(post lib.Post, postPath string) (complete bool, files []
 			}
 		}
 	}
-	return complete, files, result.Sources(filepath.Dir(postPath))
+	return complete, files, result.Sources(filepath.Dir(postPath)), errors.Join(failures...)
 }

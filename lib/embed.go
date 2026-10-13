@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"html"
 	"net/url"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -113,4 +114,38 @@ func relativeURL(dir, path string) (string, bool) {
 		segments[i] = url.PathEscape(segment)
 	}
 	return strings.Join(segments, "/"), true
+}
+
+// EmbedMediaInFile adds local players to an existing HTML post through atomic
+// publication. Missing posts are errors so callers keep output work retryable.
+func EmbedMediaInFile(path, postVideoID string, media EmbeddedMedia) error {
+	return embedMediaInFileWith(path, postVideoID, media, writeFileAtomically)
+}
+
+func embedMediaInFileWith(path, postVideoID string, media EmbeddedMedia, publish func(string, []byte) error) error {
+	if media.Podcast == "" && len(media.Videos) == 0 {
+		return nil
+	}
+	info, err := os.Lstat(path)
+	if err != nil {
+		return fmt.Errorf("read HTML post %s: %w", path, err)
+	}
+	if !info.Mode().IsRegular() || info.Size() == 0 {
+		return fmt.Errorf("HTML post %s is not a nonempty regular file", path)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	content := string(data)
+	var title string
+	if i := strings.Index(content, "</h1>"); i >= 0 {
+		rest := strings.TrimLeft(content[i+len("</h1>"):], "\n")
+		title, content = content[:len(content)-len(rest)], rest
+	}
+	updated := title + EmbedMedia(content, postVideoID, media)
+	if updated == string(data) {
+		return nil
+	}
+	return publish(path, []byte(updated))
 }

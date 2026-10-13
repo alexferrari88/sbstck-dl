@@ -205,8 +205,8 @@ func TestDownloadEmbedsMedia(t *testing.T) {
 
 		page, err = os.ReadFile(filepath.Join(dir, "20250102_030405_embeds.html"))
 		require.NoError(t, err)
-		assert.Equal(t, "<h1>embeds</h1>\n\n<p>before</p>"+videoTag(embedID, "20250102_030405_embeds_video-d162532c.mp4")+"<p>after</p>", string(page))
-		assert.FileExists(t, filepath.Join(dir, "videos", "20250102_030405_embeds_video-d162532c.mp4"))
+		assert.Equal(t, "<h1>embeds</h1>\n\n<p>before</p>"+videoTag(embedID, "20250102_030405_embeds_video-d162532c-e6f4-486d-b168-406f015f78dd.mp4")+"<p>after</p>", string(page))
+		assert.FileExists(t, filepath.Join(dir, "videos", "20250102_030405_embeds_video-d162532c-e6f4-486d-b168-406f015f78dd.mp4"))
 
 		page, err = os.ReadFile(filepath.Join(dir, "20250102_030405_video-post.html"))
 		require.NoError(t, err)
@@ -227,7 +227,7 @@ func TestDownloadEmbedsMedia(t *testing.T) {
 
 		page, err = os.ReadFile(filepath.Join(dir, "20250102_030405_embeds.html"))
 		require.NoError(t, err)
-		assert.Contains(t, string(page), videoTag(embedID, "20250102_030405_embeds_video-d162532c.mp4"))
+		assert.Contains(t, string(page), videoTag(embedID, "20250102_030405_embeds_video-d162532c-e6f4-486d-b168-406f015f78dd.mp4"))
 
 		page, err = os.ReadFile(filepath.Join(dir, "20250102_030405_episode.html"))
 		require.NoError(t, err)

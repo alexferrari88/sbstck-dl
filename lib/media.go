@@ -2,6 +2,8 @@ package lib
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -57,6 +59,7 @@ func newMediaDownloader(fetcher *Fetcher) *mediaDownloader {
 	// mediaIdleTimeout instead.
 	cdn := *fetcher.Client
 	cdn.Timeout = 0
+	cdn.Jar = nil
 	return &mediaDownloader{fetcher: fetcher, cdn: &cdn}
 }
 
@@ -86,6 +89,12 @@ type mediaResult struct {
 // file's duration can't be read. The extension is picked from the final
 // download URL or the response's Content-Type, among the job's allowed ones.
 func (m *mediaDownloader) download(ctx context.Context, job mediaJob) (*mediaResult, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := checkMediaDestinations(job.basePath, job.exts); err != nil {
+		return nil, err
+	}
 	if path, size, ok := existingMediaFile(job.basePath, job.exts); ok {
 		return &mediaResult{LocalPath: path, Size: size, Existed: true}, nil
 	}
@@ -99,6 +108,9 @@ func (m *mediaDownloader) download(ctx context.Context, job mediaJob) (*mediaRes
 		}
 	}
 
+	if err := checkMediaDestinations(job.basePath+"_preview", job.exts); err != nil {
+		return nil, err
+	}
 	hintPreview := job.previewHint != nil && job.previewHint(cdnURL)
 	if hintPreview {
 		if path, size, ok := existingMediaFile(job.basePath+"_preview", job.exts); ok {
@@ -124,6 +136,12 @@ func (m *mediaDownloader) download(ctx context.Context, job mediaJob) (*mediaRes
 	if preview {
 		finalPath = job.basePath + "_preview" + ext
 	}
+	if fetched.size <= 0 {
+		return nil, fmt.Errorf("downloaded media is empty: %s", partPath)
+	}
+	if err := checkMediaDestination(finalPath); err != nil {
+		return nil, err
+	}
 	if err := os.Rename(partPath, finalPath); err != nil {
 		return nil, fmt.Errorf("failed to finalize file: %w", err)
 	}
@@ -135,11 +153,35 @@ func (m *mediaDownloader) download(ctx context.Context, job mediaJob) (*mediaRes
 // existingMediaFile looks for basePath with any of the given extensions.
 func existingMediaFile(basePath string, exts []string) (path string, size int64, ok bool) {
 	for _, ext := range exts {
-		if info, err := os.Stat(basePath + ext); err == nil {
+		if info, err := os.Lstat(basePath + ext); err == nil && info.Mode().IsRegular() && info.Size() > 0 {
 			return basePath + ext, info.Size(), true
 		}
 	}
 	return "", 0, false
+}
+
+// checkMediaDestination rejects non-file conflicts without removing user data.
+func checkMediaDestination(path string) error {
+	info, err := os.Lstat(path)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("inspect media destination %s: %w", path, err)
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("media destination %s is not a regular file", path)
+	}
+	return nil
+}
+
+func checkMediaDestinations(base string, exts []string) error {
+	for _, ext := range exts {
+		if err := checkMediaDestination(base + ext); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // mediaContentTypes maps media types to file extensions.
@@ -200,19 +242,21 @@ func (e *permanentError) Unwrap() error { return e.err }
 // to it in partPath + ".src". On failure the partial file is kept so the next
 // run can resume it.
 func (m *mediaDownloader) fetchToFile(ctx context.Context, rawURL, partPath string) (*fetchedFile, error) {
-	source := mediaSourceKey(rawURL)
-	if prev, err := os.ReadFile(partPath + ".src"); err != nil || string(prev) != source {
-		// A partial download of a different file can't be resumed
-		if err := os.Remove(partPath); err != nil && !os.IsNotExist(err) {
+	for _, path := range []string{partPath, partPath + ".src"} {
+		if err := checkMediaDestination(path); err != nil {
 			return nil, err
 		}
-		os.Remove(partPath + ".src")
 	}
+	source := mediaSourceKey(rawURL)
 
 	b := newMediaBackoff()
 	failures := 0
+	var highWatermark int64
+	if info, err := os.Lstat(partPath); err == nil {
+		highWatermark = info.Size()
+	}
 	for {
-		fetched, progressed, err := m.fetchAttempt(ctx, rawURL, partPath, source)
+		fetched, _, err := m.fetchAttempt(ctx, rawURL, partPath, source)
 		if err == nil {
 			return fetched, nil
 		}
@@ -224,7 +268,11 @@ func (m *mediaDownloader) fetchToFile(ctx context.Context, rawURL, partPath stri
 			return nil, ctx.Err()
 		}
 
-		if progressed {
+		// Repeated overwritten prefixes are not progress. Only a larger retained
+		// prefix with a strong representation validator can reset retry failures.
+		retained := readMediaSource(partPath + ".src")
+		if info, statErr := os.Lstat(partPath); statErr == nil && retained.SourceDigest == source && strongMediaETag(retained.ETag) && info.Size() > highWatermark {
+			highWatermark = info.Size()
 			b.Reset()
 			failures = 0
 		}
@@ -253,8 +301,15 @@ type fetchedFile struct {
 // before failing. Errors not wrapped in permanentError are worth retrying.
 func (m *mediaDownloader) fetchAttempt(ctx context.Context, rawURL, partPath, source string) (fetched *fetchedFile, progressed bool, err error) {
 	var offset int64
-	if info, err := os.Stat(partPath); err == nil {
+	previous := readMediaSource(partPath + ".src")
+	if info, err := os.Lstat(partPath); err == nil {
 		offset = info.Size()
+	}
+	if offset > 0 && (previous.SourceDigest != source || !strongMediaETag(previous.ETag)) {
+		if err := os.Remove(partPath); err != nil {
+			return nil, false, &permanentError{err}
+		}
+		offset = 0
 	}
 
 	if err := m.fetcher.RateLimiter.Wait(ctx); err != nil {
@@ -271,6 +326,7 @@ func (m *mediaDownloader) fetchAttempt(ctx context.Context, rawURL, partPath, so
 	req.Header.Set("User-Agent", userAgent)
 	if offset > 0 {
 		req.Header.Set("Range", fmt.Sprintf("bytes=%d-", offset))
+		req.Header.Set("If-Range", previous.ETag)
 	}
 
 	res, err := m.cdn.Do(req)
@@ -283,7 +339,7 @@ func (m *mediaDownloader) fetchAttempt(ctx context.Context, rawURL, partPath, so
 	switch {
 	case res.StatusCode == http.StatusPartialContent:
 		start, t, ok := parseContentRange(res.Header.Get("Content-Range"))
-		if !ok || start != offset {
+		if !ok || start != offset || offset <= 0 || res.Header.Get("ETag") != previous.ETag {
 			os.Remove(partPath)
 			return nil, false, errors.New("server returned an unexpected range, restarting download")
 		}
@@ -294,7 +350,7 @@ func (m *mediaDownloader) fetchAttempt(ctx context.Context, rawURL, partPath, so
 		total = res.ContentLength
 	case res.StatusCode == http.StatusRequestedRangeNotSatisfiable:
 		// Most likely the partial file is already complete
-		if _, t, ok := parseContentRange(res.Header.Get("Content-Range")); ok && t == offset {
+		if _, t, ok := parseContentRange(res.Header.Get("Content-Range")); ok && t == offset && offset > 0 && res.Header.Get("ETag") == previous.ETag {
 			return &fetchedFile{size: offset, finalURL: res.Request.URL.String()}, false, nil
 		}
 		os.Remove(partPath)
@@ -305,9 +361,6 @@ func (m *mediaDownloader) fetchAttempt(ctx context.Context, rawURL, partPath, so
 		return nil, false, &permanentError{&FetchError{StatusCode: res.StatusCode}}
 	}
 
-	if err := os.WriteFile(partPath+".src", []byte(source), 0644); err != nil {
-		return nil, false, &permanentError{err}
-	}
 	flags := os.O_CREATE | os.O_WRONLY | os.O_APPEND
 	if offset == 0 {
 		flags |= os.O_TRUNC
@@ -315,6 +368,25 @@ func (m *mediaDownloader) fetchAttempt(ctx context.Context, rawURL, partPath, so
 	file, err := os.OpenFile(partPath, flags, 0644)
 	if err != nil {
 		return nil, false, &permanentError{err}
+	}
+
+	// A 200 response restarts the representation. Truncate and persist the old
+	// bytes before publishing a new validator: failed opens or interruptions
+	// must never relabel the previous prefix as belonging to another version.
+	if offset == 0 {
+		if err := file.Sync(); err != nil {
+			file.Close()
+			return nil, false, &permanentError{err}
+		}
+		sourceData, err := json.Marshal(mediaSource{SourceDigest: source, ETag: res.Header.Get("ETag")})
+		if err != nil {
+			file.Close()
+			return nil, false, &permanentError{err}
+		}
+		if err := writeFileAtomically(partPath+".src", sourceData); err != nil {
+			file.Close()
+			return nil, false, &permanentError{err}
+		}
 	}
 
 	idle := time.AfterFunc(mediaIdleTimeout, cancel)
@@ -402,16 +474,39 @@ func parseContentRange(header string) (start, total int64, ok bool) {
 	return s, total, true
 }
 
-// mediaSourceKey identifies the file behind a signed CDN URL: the URL without
-// its query string, which holds the signature and changes on every request.
-func mediaSourceKey(rawURL string) string {
-	u, err := url.Parse(rawURL)
-	if err != nil {
-		return rawURL
+// mediaSource requires both the exact request identity and a strong validator
+// before partial bytes can be reused. Legacy or unverifiable records restart.
+type mediaSource struct {
+	SourceDigest string `json:"source_digest"`
+	ETag         string `json:"etag,omitempty"`
+}
+
+func readMediaSource(path string) mediaSource {
+	var source mediaSource
+	data, err := os.ReadFile(path)
+	if err == nil {
+		_ = json.Unmarshal(data, &source)
 	}
-	u.RawQuery = ""
-	u.Fragment = ""
-	return u.String()
+	return source
+}
+
+func strongMediaETag(etag string) bool {
+	if len(etag) < 2 || etag[0] != '"' || etag[len(etag)-1] != '"' {
+		return false
+	}
+	for i := 1; i < len(etag)-1; i++ {
+		if etag[i] < 0x21 || etag[i] == 0x22 || etag[i] == 0x7f {
+			return false
+		}
+	}
+	return true
+}
+
+// mediaSourceKey stores a nonsecret identity for the exact source URL. Query
+// parameters may select different files, so changing even a signing parameter
+// safely restarts a persisted partial download rather than guessing equivalence.
+func mediaSourceKey(rawURL string) string {
+	return fmt.Sprintf("sha256:%x", sha256.Sum256([]byte(rawURL)))
 }
 
 // publicationOrigin returns the scheme and host of the post's publication.

@@ -32,7 +32,7 @@ type MediaRecord map[string]*MediaStatus
 
 // MediaStatus is the outcome of downloading one kind of media for a post.
 type MediaStatus struct {
-	// Complete is true when there is nothing left to download: all media was
+	// Complete is true after successful output publication, when all media was
 	// downloaded in full, or the post has none. Previews, unavailable or
 	// failed downloads leave it false so the post is checked again.
 	Complete bool `json:"complete"`
@@ -45,7 +45,7 @@ func NewMediaManifest(outputDir string) *MediaManifest {
 	return &MediaManifest{
 		path:      filepath.Join(outputDir, MediaManifestFile),
 		outputDir: outputDir,
-		Version:   1,
+		Version:   2,
 		Posts:     map[string]*MediaRecord{},
 	}
 }
@@ -55,6 +55,9 @@ func NewMediaManifest(outputDir string) *MediaManifest {
 func LoadMediaManifest(outputDir string) (*MediaManifest, error) {
 	m := NewMediaManifest(outputDir)
 
+	if err := checkMediaDestination(m.path); err != nil {
+		return nil, err
+	}
 	data, err := os.ReadFile(m.path)
 	if errors.Is(err, os.ErrNotExist) {
 		return m, nil
@@ -62,13 +65,52 @@ func LoadMediaManifest(outputDir string) (*MediaManifest, error) {
 	if err != nil {
 		return nil, err
 	}
+	m.Version = 0
 	if err := json.Unmarshal(data, m); err != nil {
 		return nil, fmt.Errorf("failed to parse %s: %w", m.path, err)
+	}
+	if m.Version != 1 && m.Version != 2 {
+		return nil, fmt.Errorf("unsupported media manifest version %d in %s", m.Version, m.path)
 	}
 	if m.Posts == nil {
 		m.Posts = map[string]*MediaRecord{}
 	}
+	for slug, record := range m.Posts {
+		if record == nil {
+			continue
+		}
+		for kind, status := range *record {
+			if status == nil {
+				continue
+			}
+			for _, file := range status.Files {
+				if !validMediaManifestPath(file) {
+					return nil, fmt.Errorf("invalid media path %q for %s/%s", file, slug, kind)
+				}
+			}
+		}
+	}
+	// Version 1 only certified downloaded bytes, so it cannot prove the local
+	// players were published. Retain files for reuse but require one output repair.
+	if m.Version == 1 {
+		for _, record := range m.Posts {
+			if record == nil {
+				continue
+			}
+			for _, status := range *record {
+				if status != nil {
+					status.Complete = false
+				}
+			}
+		}
+		m.Version = 2
+	}
 	return m, nil
+}
+
+func validMediaManifestPath(file string) bool {
+	path := filepath.FromSlash(file)
+	return path != "" && filepath.IsLocal(path) && path != "."
 }
 
 // IsComplete reports whether the given kind of media is complete for the post:
@@ -83,7 +125,10 @@ func (m *MediaManifest) IsComplete(slug, kind string) bool {
 		return false
 	}
 	for _, file := range status.Files {
-		if _, err := os.Stat(filepath.Join(m.outputDir, filepath.FromSlash(file))); err != nil {
+		if !validMediaManifestPath(file) {
+			return false
+		}
+		if info, err := os.Lstat(filepath.Join(m.outputDir, filepath.FromSlash(file))); err != nil || !info.Mode().IsRegular() || info.Size() == 0 {
 			return false
 		}
 	}
@@ -93,6 +138,9 @@ func (m *MediaManifest) IsComplete(slug, kind string) bool {
 // Record stores the status of a kind of media for the post. Local paths in
 // files are stored relative to the output directory.
 func (m *MediaManifest) Record(slug, kind string, complete bool, files []string) {
+	if m.Posts == nil {
+		m.Posts = map[string]*MediaRecord{}
+	}
 	status := &MediaStatus{Complete: complete}
 	for _, file := range files {
 		if rel, err := filepath.Rel(m.outputDir, file); err == nil {
@@ -102,7 +150,7 @@ func (m *MediaManifest) Record(slug, kind string, complete bool, files []string)
 	}
 
 	record := m.Posts[slug]
-	if record == nil {
+	if record == nil || *record == nil {
 		record = &MediaRecord{}
 		m.Posts[slug] = record
 	}
@@ -111,6 +159,27 @@ func (m *MediaManifest) Record(slug, kind string, complete bool, files []string)
 
 // Save writes the manifest to the output directory, atomically.
 func (m *MediaManifest) Save() error {
+	if m.Version != 2 {
+		return fmt.Errorf("unsupported media manifest version %d", m.Version)
+	}
+	if err := checkMediaDestination(m.path); err != nil {
+		return err
+	}
+	for slug, record := range m.Posts {
+		if record == nil {
+			continue
+		}
+		for kind, status := range *record {
+			if status == nil {
+				continue
+			}
+			for _, path := range status.Files {
+				if !validMediaManifestPath(path) {
+					return fmt.Errorf("invalid media path %q for %s/%s", path, slug, kind)
+				}
+			}
+		}
+	}
 	data, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {
 		return err
@@ -118,9 +187,5 @@ func (m *MediaManifest) Save() error {
 	if err := os.MkdirAll(m.outputDir, 0755); err != nil {
 		return err
 	}
-	tmp := m.path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0644); err != nil {
-		return err
-	}
-	return os.Rename(tmp, m.path)
+	return writeFileAtomically(m.path, append(data, '\n'))
 }

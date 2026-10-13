@@ -41,8 +41,8 @@ func TestVideoRefs(t *testing.T) {
 		refs := post.videoRefs("base")
 		assert.Equal(t, []videoRef{
 			{uploadID: "post-video", name: "base"},
-			{uploadID: embed1, name: "base_video-d162532c"},
-			{uploadID: embed2, name: "base_video-a2517b10"},
+			{uploadID: embed1, name: "base_video-" + embed1},
+			{uploadID: embed2, name: "base_video-" + embed2},
 		}, refs)
 	})
 

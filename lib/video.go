@@ -60,15 +60,19 @@ type videoRef struct {
 var uploadIDPattern = regexp.MustCompile(`^[A-Za-z0-9-]{1,64}$`)
 
 // videoRefs lists the post's Substack-hosted videos. The post's own video is
-// named <baseName>, embedded videos <baseName>_video-<ID prefix>, so their
+// named <baseName>, embedded videos <baseName>_video-<ID>, so their
 // names stay the same if the post's videos are reordered or edited.
 func (p *Post) videoRefs(baseName string) []videoRef {
 	var refs []videoRef
 	seen := make(map[string]bool)
 
-	if uploadIDPattern.MatchString(p.VideoUploadId) {
-		refs = append(refs, videoRef{uploadID: p.VideoUploadId, name: baseName})
-		seen[p.VideoUploadId] = true
+	postID := p.VideoUploadId
+	if postID == "" && p.VideoUpload != nil {
+		postID = p.VideoUpload.Id
+	}
+	if uploadIDPattern.MatchString(postID) {
+		refs = append(refs, videoRef{uploadID: postID, name: baseName})
+		seen[postID] = true
 	}
 
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(p.BodyHTML))
@@ -87,19 +91,10 @@ func (p *Post) videoRefs(baseName string) []videoRef {
 			return
 		}
 		seen[id] = true
-		refs = append(refs, videoRef{uploadID: id, name: baseName + "_video-" + shortUploadID(id)})
+		refs = append(refs, videoRef{uploadID: id, name: baseName + "_video-" + id})
 	})
 
 	return refs
-}
-
-// shortUploadID returns the first block of a UUID upload ID (8 hex digits),
-// enough to tell a post's videos apart.
-func shortUploadID(id string) string {
-	if i := strings.IndexByte(id, '-'); i >= 8 {
-		return id[:i]
-	}
-	return id
 }
 
 // DownloadVideos downloads the post's videos to <outputDir>/<videosDir>/ as MP4
@@ -142,9 +137,17 @@ func (vd *VideoDownloader) DownloadVideos(ctx context.Context, post Post, baseNa
 // path to save it under, without extension.
 func (vd *VideoDownloader) downloadVideo(ctx context.Context, apiURL, basePath string) VideoInfo {
 	info := VideoInfo{LocalPath: basePath + ".mp4"}
+	if err := ctx.Err(); err != nil {
+		info.Error = err
+		return info
+	}
 
 	// Checked before fetching metadata so re-runs make no requests
-	if stat, err := os.Stat(info.LocalPath); err == nil {
+	if err := checkMediaDestination(info.LocalPath); err != nil {
+		info.Error = err
+		return info
+	}
+	if stat, err := os.Lstat(info.LocalPath); err == nil && stat.Mode().IsRegular() && stat.Size() > 0 {
 		info.Size = stat.Size()
 		info.Existed = true
 		info.Success = true

@@ -65,7 +65,9 @@ Date filters use sitemap `lastmod` when a valid sitemap exists and publication `
 
 When downloading the full archive, if the downloader is interrupted, at the next execution it will resume the download of the remaining posts.
 
-With `--download-podcasts` or `--download-videos`, posts that were already downloaded are revisited to fetch their media, without rewriting the post files. This lets you add media to an existing download. Which posts' media is complete is recorded in `.sbstck-dl-media.json` in the output directory, so later runs only revisit posts with media still missing: previews, failed downloads, deleted files, and paywalled posts checked without a cookie (Substack may hide their media). Delete that file to have every post checked again.
+With `--download-podcasts` or `--download-videos`, posts that were already downloaded are revisited to fetch their media, without rewriting their post bodies. This lets you add media to an existing download. `.sbstck-dl-media.json` records completed media work only after the media file and its requested output have been published successfully. For existing posts, this includes embedding in HTML; newly written selected outputs include their media references. Existing Markdown files are retained without modification. If embedding or manifest reading/writing fails, the command returns a nonzero status and a later run retries unfinished work, reusing valid downloaded media when possible. Delete the manifest to have every post checked again.
+
+Existing HTML posts are updated with atomic publication that preserves unrelated user edits and file permissions. Cached downloads count as complete only when they are regular, nonempty, nonsymlink files. Missing or empty files are retried; invalid non-file destinations are reported and left intact. Unexpected transport, storage, embedding, or manifest errors produce warnings and a nonzero command result while other usable media can still be kept. Available previews and expected withheld or access-limited media produce warnings and remain retryable; cancellation is an error.
 
 ```bash
 Usage:
@@ -221,7 +223,7 @@ Use the `--download-podcasts` flag to download the audio of podcast episodes as 
 - Saves audio as `{output}/podcasts/{post-file-name}.mp3`, next to the matching post file. Podcasts hosted outside Substack keep their format, e.g. `.m4a` or `.ogg`
 - Embeds an audio player in HTML posts, below the title, playing the downloaded file. Markdown posts get a link to the audio instead
 - Skips episodes that were already downloaded, including in posts downloaded by earlier runs. HTML posts downloaded by earlier runs get the player added, leaving the rest of the file as it is
-- Retries failed and stalled downloads, resuming where they stopped. Interrupted downloads are kept as `.part` files and resumed on the next run
+- Retries failed and stalled downloads. Interrupted downloads are kept as `.part` files; resume identifies the exact source URL by its SHA-256 hash and validates ranges with server ETag/If-Range metadata when available. A changed signed URL or missing reliable version validators safely restarts the transfer. Signed URL tokens are not persisted
 - Downloads paid episodes when you pass a paid subscriber's cookie (see [Private Newsletters](#private-newsletters))
 
 Without a paid subscriber cookie, or with an expired one, Substack only serves a free preview of paid episodes. When that happens, sbstck-dl prints a warning and saves the preview as `{post-file-name}_preview.mp3`. If you run it again with a valid cookie, it still downloads the full episode. Previews are recognized by comparing the downloaded file's own duration with the full episode's length. Some publications serve no preview of paid episodes at all; then sbstck-dl warns that the audio is not available.
@@ -252,10 +254,10 @@ output/
 Use the `--download-videos` flag to download Substack-hosted videos as MP4 files. This covers both the video of a video post and native videos embedded in a post's body. Third-party embeds, such as YouTube videos, are not downloaded (use a tool like `yt-dlp` for those).
 
 **Features:**
-- Saves the post's own video as `{output}/videos/{post-file-name}.mp4` and embedded videos as `{post-file-name}_video-{id}.mp4`, where `{id}` identifies the video, so names don't change if the post's videos are reordered
+- Saves the post's own video as `{output}/videos/{post-file-name}.mp4` and embedded videos as `{post-file-name}_video-{video-uuid}.mp4`, using the full video UUID so names don't change if the post's videos are reordered
 - Embeds the downloaded videos in HTML posts, where they play from the local files. The post's own video goes below the title, embedded videos where they appear in the post. Markdown posts get a link to each video instead
 - Skips videos that were already downloaded, including in posts downloaded by earlier runs. HTML posts downloaded by earlier runs get their videos embedded, leaving the rest of the file as it is
-- Retries failed and stalled downloads, resuming where they stopped, also across runs
+- Retries failed and stalled downloads. Interrupted downloads are kept as `.part` files; resume identifies the exact source URL by its SHA-256 hash and validates ranges with server ETag/If-Range metadata when available. A changed signed URL or missing reliable version validators safely restarts the transfer. Signed URL tokens are not persisted
 - Downloads paid videos in full when you pass a paid subscriber's cookie. The cookie is only sent to Substack, never to the video CDN
 
 As with podcasts, without a paid subscriber cookie Substack only serves a free preview of paid videos. When that happens, sbstck-dl prints a warning and saves the preview with a `_preview` suffix, so a later run with a cookie still downloads the full video.
@@ -276,7 +278,7 @@ output/
 ├── 20231201_120000_episode-title.html
 └── videos/
     ├── 20231201_120000_episode-title.mp4
-    └── 20231201_120000_episode-title_video-d162532c.mp4
+    └── 20231201_120000_episode-title_video-550e8400-e29b-41d4-a716-446655440000.mp4
 ```
 
 #### Creating Archive Index Pages
