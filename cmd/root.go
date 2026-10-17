@@ -95,7 +95,12 @@ var (
 // Execute adds all child commands to the root command and sets flags appropriately.
 // This is called by main.main(). It only needs to happen once to the rootCmd.
 func Execute() {
-	rootCmd.SetArgs(normalizeFormatArgs(os.Args[1:]))
+	args := os.Args[1:]
+	command, _, findErr := rootCmd.Find(args)
+	if findErr != nil || command.Name() != "export-epub" {
+		args = normalizeFormatArgs(args)
+	}
+	rootCmd.SetArgs(args)
 	err := rootCmd.Execute()
 	if err != nil {
 		os.Exit(1)
@@ -116,6 +121,7 @@ func init() {
 	rootCmd.AddCommand(listCmd)
 	rootCmd.AddCommand(versionCmd)
 	rootCmd.AddCommand(updateArchiveCmd)
+	rootCmd.AddCommand(newExportEPUBCommand())
 }
 
 func makeDateFilterFunc(beforeDate string, afterDate string) lib.DateFilterFunc {

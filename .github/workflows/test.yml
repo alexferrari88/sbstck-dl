@@ -21,3 +21,27 @@ jobs:
           
       - name: Run tests
         run: go test -v ./...
+
+  epub-conformance:
+    name: Validate exported EPUB books
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Download verified EPUBCheck
+        shell: bash
+        run: |
+          curl --fail --location --retry 3 \
+            https://github.com/w3c/epubcheck/releases/download/v5.4.0/epubcheck-5.4.0.zip \
+            --output "$RUNNER_TEMP/epubcheck.zip"
+          printf '%s  %s\n' 33350c61038e71dfb3d45a76aed04bf5481e6d5500cb780f6e98db8bbd15a28c "$RUNNER_TEMP/epubcheck.zip" | sha256sum --check
+          unzip -q "$RUNNER_TEMP/epubcheck.zip" -d "$RUNNER_TEMP"
+          echo "EPUBCHECK_JAR=$RUNNER_TEMP/epubcheck-5.4.0/epubcheck.jar" >> "$GITHUB_ENV"
+      - name: Check fixture books with EPUBCheck
+        run: go test -v ./cmd -run '^TestExportEPUBCLI$' -count=1

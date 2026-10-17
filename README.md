@@ -102,6 +102,31 @@ Global Flags:
   -v, --verbose         Enable verbose output
 ```
 
+#### Offline EPUB books
+
+Prepare an HTML archive with local images, then export it as one book:
+
+```bash
+sbstck-dl download --url https://example.substack.com --output ./newsletter \
+  --format html --download-images --create-archive
+sbstck-dl export-epub --input ./newsletter --output ./newsletter.epub \
+  --title "My newsletter collection" --author "Author name" --language en
+```
+
+`export-epub` uses only the existing local archive. It needs no URL, credentials, network connection, Java, or external converter. Each eligible HTML post becomes one chapter, with a table of contents and embedded reading images. Chapters run oldest first; unknown publication dates come last, and equal dates use ascending filenames. Existing archive metadata supplies post titles and dates; legacy downloaded HTML posts also work without metadata. Index pages, unrelated files, directories, symlinks, and empty legacy posts are excluded.
+
+`--title` and `--output` are required; the output filename must end in `.epub`. `--input` defaults to the current directory. Author and language are optional: unknown authors are omitted and the language defaults to `und` (undetermined). An explicit language must be a valid BCP 47 tag. Every eligible post is included; date filters and individual post selection are not supported.
+
+Local PNG, JPEG, GIF, and WebP images, inline base64 images in those formats, and existing PNG previews are supported. Images must decode successfully and contain at most 50 megapixels. Inline SVG and other image formats require a compatible local image or preview. The exported book has simple reading styles and retains text structure, Unicode, links, and navigation between included posts. Original website styling and scripts are not carried over.
+
+Known web links, including original post links when retained in the HTML, stay usable. Audio, video, and attachments are not bundled. Their known online destinations remain links; local-only destinations without a known web URL become clear unavailable-in-this-book notes. Linked online content still needs a network connection to open. Missing authors or source URLs are never guessed.
+
+Missing or unreadable required posts/images, remote-only images, corrupt archive metadata, an empty archive, cancellation, and output failures return a nonzero exit status. Posts listed in retained metadata cannot be silently omitted. A failed export preserves any previous EPUB and removes temporary output; source posts, images, metadata, and indexes remain unchanged. Output paths that alias source resources are rejected. The destination directory must already exist.
+
+If an older archive has remote-only or missing images, prepare a fresh download directory with `--download-images` before exporting. Existing downloaded posts can be skipped by normal download resumption, so simply rerunning the original download may not repair their images. Export never fetches missing content or repairs its input archive. Completeness describes the local archive, not a guarantee that every online post was downloaded or that paywalled content was accessible.
+
+KOReader is the reference reader. The EPUB is portable: it can be moved away from the source directory and read offline. PDF generation and direct URL-to-EPUB downloads are deferred.
+
 #### Multiple output formats
 
 HTML is the default. Download several formats in one invocation using any of:
