@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -28,6 +29,9 @@ func (r *RawPost) ToPost() (Post, error) {
 	err := json.Unmarshal([]byte(r.str), &wrapper)
 	if err != nil {
 		return Post{}, err
+	}
+	if wrapper.Post == (Post{}) {
+		return Post{}, errors.New("missing or empty post data")
 	}
 	return wrapper.Post, nil
 }
@@ -252,27 +256,16 @@ func NewExtractor(f *Fetcher) *Extractor {
 	return &Extractor{fetcher: f}
 }
 
-// extractJSONString finds and extracts the JSON data from script content.
-// This optimized version reduces string operations.
+var legacyPreloadPattern = regexp.MustCompile(`\bwindow\._preloads\s*=\s*JSON\.parse\(\s*"((?:[^"\\]|\\.)*)"\s*\)`)
+
+// extractJSONString returns the escaped JSON string assigned to legacy preloads.
 func extractJSONString(doc *goquery.Document) (string, error) {
 	var jsonString string
 	var found bool
 
 	doc.Find("script").EachWithBreak(func(i int, s *goquery.Selection) bool {
-		content := s.Text()
-		if strings.Contains(content, "window._preloads") && strings.Contains(content, "JSON.parse(") {
-			start := strings.Index(content, "JSON.parse(\"")
-			if start == -1 {
-				return true
-			}
-			start += len("JSON.parse(\"")
-
-			end := strings.LastIndex(content, "\")")
-			if end == -1 || start >= end {
-				return true
-			}
-
-			jsonString = content[start:end]
+		if match := legacyPreloadPattern.FindStringSubmatch(s.Text()); match != nil {
+			jsonString = match[1]
 			found = true
 			return false
 		}
@@ -284,6 +277,23 @@ func extractJSONString(doc *goquery.Document) (string, error) {
 	}
 
 	return jsonString, nil
+}
+
+// extractPostJSON returns the decoded preload payload for both page layouts.
+func extractPostJSON(doc *goquery.Document) (string, error) {
+	if data := doc.Find(`script#preloads-json[type="application/json"]`).First(); data.Length() != 0 {
+		return data.Text(), nil
+	}
+
+	jsonString, err := extractJSONString(doc)
+	if err != nil {
+		return "", err
+	}
+	var data string
+	if err := json.Unmarshal([]byte("\""+jsonString+"\""), &data); err != nil {
+		return "", fmt.Errorf("failed to unescape JSON: %w", err)
+	}
+	return data, nil
 }
 
 func (e *Extractor) ExtractPost(ctx context.Context, pageUrl string) (Post, error) {
@@ -299,19 +309,13 @@ func (e *Extractor) ExtractPost(ctx context.Context, pageUrl string) (Post, erro
 		return Post{}, fmt.Errorf("failed to parse HTML: %w", err)
 	}
 
-	jsonString, err := extractJSONString(doc)
+	jsonString, err := extractPostJSON(doc)
 	if err != nil {
 		return Post{}, fmt.Errorf("failed to extract post data: %w", err)
 	}
 
-	// Unescape the JSON string directly
-	var rawJSON RawPost
-	err = json.Unmarshal([]byte("\""+jsonString+"\""), &rawJSON.str)
-	if err != nil {
-		return Post{}, fmt.Errorf("failed to unescape JSON: %w", err)
-	}
-
 	// Convert to a Go object
+	rawJSON := RawPost{str: jsonString}
 	p, err := rawJSON.ToPost()
 	if err != nil {
 		return Post{}, fmt.Errorf("failed to parse post data: %w", err)
