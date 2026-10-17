@@ -1,8 +1,8 @@
 # Current work
 
-Goal: implement issue #21's accepted offline EPUB export brief. PDF remains deferred.
+Goal: publish v0.10.0 through the validated GitHub release workflow, including the completed offline EPUB export feature from issue #21.
 
-Status: accepted EPUB scope implemented and validated. Authoritative brief: https://github.com/alexferrari88/sbstck-dl/issues/21#issuecomment-6239626967. The separate export-epub command, regression tests, user documentation, and pinned EPUBCheck CI job are complete.
+Status: preparing the v0.10.0 version commit and custom release notes. The previous latest published release is v0.9.0. Native release validation, draft asset verification, publication, and independent post-publication checks remain.
 
 Agreed scope: EPUB first, PDF deferred. Export one existing local HTML archive offline as one book, with every eligible post as a chapter, a table of contents, and embedded reading images. Order oldest first, unknown dates last, filename ascending for ties. Require a book title; author/language are optional, unknown author is omitted, and language defaults to undetermined (`und`). Missing required posts/images or publication failures must fail clearly and preserve a previous EPUB. Source archives remain unchanged.
 
@@ -16,4 +16,4 @@ Reader acceptance: KOReader Linux v2026.07.1 under Xvfb opened the final represe
 
 Review: independent standards/spec reviews against b8e9145 found renderer/preflight classification, cross-chapter image links, and linked-media XHTML defects. All were fixed and covered by regressions, including transparent block/inline cards and plain link labels. Both reviewers confirmed zero outstanding findings on final implementation commit 98d8672.
 
-Next action: none for implementation. PDF and direct URL-to-EPUB workflows remain deferred; any future release follows the repository release workflow.
+Next action: commit/push the release version, prepare an unpublished draft targeting that exact full source SHA, dispatch build-release.yml for v0.10.0, monitor the three native validation/build jobs and publication gate, then independently verify release state, tag/source parity, all six assets, and the released Linux CLI.
