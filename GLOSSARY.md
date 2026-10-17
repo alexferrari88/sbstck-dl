@@ -16,3 +16,6 @@ The image representing a post in an archive index. It can share a downloaded bod
 
 **Archive workflow**:
 One download run's restoration and update of the selected archives, including cover reconciliation and publication of their metadata and indexes.
+
+**Exported book**:
+A single ebook containing selected archived posts as chapters, with a table of contents and embedded reading images. It is derived from a local archive and is separate from that archive's posts, metadata, and index.

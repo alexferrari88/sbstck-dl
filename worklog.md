@@ -1,15 +1,13 @@
 # Current work
 
-Goal: publish v0.9.0 through the validated GitHub release workflow.
+Goal: finish triage of issue #21 and publish an agent-ready brief for EPUB export. Implementation is not part of this task.
 
-Status: release published and verified at 2026-10-17T18:51:55Z: https://github.com/alexferrari88/sbstck-dl/releases/tag/v0.9.0. It is the latest, non-draft, non-prerelease release. Source and tag resolve to d96bdc9e0cc51126ad7a35e4ea4ed65d7098edae.
+Status: enhancement / needs-triage / priority:P3. Maintainer accepted EPUB first with PDF deferred, one book containing selected posts as chapters, a table of contents, and embedded images. The next round accepted offline export from an existing HTML archive, KOReader as the reference reader alongside automated EPUB validation, and failure on missing required posts/images while preserving any previous EPUB. Audio, video, and attachments remain links.
 
-Contents: the issue #31 post-preload extraction fix; native podcast/video metadata and downloads; failure-safe media handling; and offline archive index rebuilding added since v0.8.1. Custom release notes describe these changes and the amd64 downloads for Linux, macOS, and Windows.
+Verified: current post conversion, CLI formats, archive restoration, and index generation support only HTML, Markdown, and text. No prior rejection was found. Archive metadata retains post titles/dates and cover references, but does not retain author, language, or canonical source URLs; legacy HTML may contain source links only if downloaded with that option. No EPUB implementation or reader check has been performed.
 
-Native validation: https://github.com/alexferrari88/sbstck-dl/actions/runs/39059798050 succeeded for source resolution, all three platform jobs, and asset verification/publication. Each platform passed publication-gate tests, native Go tests, vet, CLI/tag version matching, binary builds, and decoder-source packaging. Publication occurred only after all six draft asset names, sizes, checksums, and source notices were verified.
+Pending decisions: which local posts enter the book and their reading order; book title/author/language and treatment of unavailable source metadata. Capture the final scope, then post the brief and move #21 to ready-for-agent while retaining enhancement and priority:P3.
 
-Independent post-publication checks: downloaded all three binaries and three decoder-source/license bundles; confirmed their exact asset set, nonempty sizes, source notices, and SHA-256 hashes against GitHub metadata. Verified the public tag matches the validated source and the latest release is v0.9.0. The downloaded Linux binary reports sbstck-dl v0.9.0 and successfully downloads/indexes the previously failing public post as Markdown (40,967 bytes). Authenticated full paid-body access was not tested.
+Next action: confirm the remaining selection and metadata defaults with the maintainer, then finish triage without starting implementation.
 
-Release-gate correction: the first attempt (39059528426) correctly blocked publication because a media-integrity test assumed Unix 0600 permissions on Windows. The assertion now compares the actual file mode before and after embedding on each platform; no runtime behavior changed. Focused normal/race checks passed, and the fresh native run above passed on all three platforms. No published release was modified.
-
-Next action: none. Release work is complete.
+Previous work: v0.9.0 publication is complete and verified: https://github.com/alexferrari88/sbstck-dl/releases/tag/v0.9.0. Native validation and asset publication succeeded in https://github.com/alexferrari88/sbstck-dl/actions/runs/39059798050.
