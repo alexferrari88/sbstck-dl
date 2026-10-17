@@ -93,7 +93,7 @@ func prepareEPUBChapters(entries []ArchiveEntry) ([]*epubChapter, error) {
 }
 
 func walkEPUBReadingNodes(n *html.Node, visit func(*html.Node)) {
-	if epubDiscardedElement(n.Data) || epubMediaElement(n.Data) {
+	if epubDiscardedElement(n) || epubMediaElement(n) {
 		return
 	}
 	visit(n)
@@ -102,16 +102,22 @@ func walkEPUBReadingNodes(n *html.Node, visit func(*html.Node)) {
 	}
 }
 
-func epubDiscardedElement(tag string) bool {
-	switch tag {
+func epubDiscardedElement(n *html.Node) bool {
+	if n.Type != html.ElementNode {
+		return false
+	}
+	switch n.Data {
 	case "head", "script", "style", "noscript", "source", "meta", "link", "input", "button":
 		return true
 	}
 	return false
 }
 
-func epubMediaElement(tag string) bool {
-	switch tag {
+func epubMediaElement(n *html.Node) bool {
+	if n.Type != html.ElementNode {
+		return false
+	}
+	switch n.Data {
 	case "audio", "video", "iframe", "embed", "object":
 		return true
 	}
@@ -119,10 +125,10 @@ func epubMediaElement(tag string) bool {
 }
 
 func epubHasMedia(n *html.Node) bool {
-	if epubDiscardedElement(n.Data) {
+	if epubDiscardedElement(n) {
 		return false
 	}
-	if epubMediaElement(n.Data) {
+	if epubMediaElement(n) {
 		return true
 	}
 	for child := n.FirstChild; child != nil; child = child.NextSibling {
@@ -318,17 +324,29 @@ func (c *epubContent) render(chapter *epubChapter) (string, error) {
 			return nil
 		}
 		tag := n.Data
-		if epubDiscardedElement(tag) {
+		if epubDiscardedElement(n) {
 			return nil
 		}
 		if tag == "svg" {
 			return fmt.Errorf("post %s contains an unsupported inline SVG; use a local PNG preview", filepath.Base(chapter.entry.FilePath))
 		}
-		if epubMediaElement(tag) {
+		if epubMediaElement(n) {
 			var links []string
 			seen := map[string]bool{}
 			walkEPUBNodes(n, func(child *html.Node) {
-				for _, key := range []string{"src", "href", "data"} {
+				if child.Type != html.ElementNode {
+					return
+				}
+				var keys []string
+				switch child.Data {
+				case "audio", "video", "source", "iframe", "embed":
+					keys = []string{"src"}
+				case "object":
+					keys = []string{"data"}
+				case "a":
+					keys = []string{"href"}
+				}
+				for _, key := range keys {
 					raw := epubAttr(child, key)
 					if raw == "" {
 						continue
@@ -350,14 +368,21 @@ func (c *epubContent) render(chapter *epubChapter) (string, error) {
 		allowed := epubAllowedTags[tag]
 		var href string
 		mediaAnchor := false
+		unwrappedAnchor := false
 		if tag == "a" {
 			href = c.link(chapter, epubAttr(n, "href"))
 			mediaAnchor = epubHasMedia(n)
 			if href != "" && !mediaAnchor {
 				out.WriteString(`<a href="` + epubEscape(href) + `"`)
 			} else {
-				tag = "span"
-				out.WriteString("<span")
+				// Anchors have transparent content. Preserve that structure when
+				// removing the wrapper; a span would invalidate linked figures
+				// and attachment cards, while a div would invalidate inline links.
+				allowed = false
+				unwrappedAnchor = true
+				if id := epubAttr(n, "id"); id != "" {
+					out.WriteString(`<a id="` + epubEscape(id) + `"></a>`)
+				}
 			}
 		} else if allowed {
 			out.WriteString("<" + tag)
@@ -382,7 +407,7 @@ func (c *epubContent) render(chapter *epubChapter) (string, error) {
 				return err
 			}
 		}
-		if n.Data == "a" && tag == "span" && epubAttr(n, "href") != "" {
+		if unwrappedAnchor && epubAttr(n, "href") != "" {
 			if mediaAnchor && href != "" {
 				out.WriteString(` <a href="` + epubEscape(href) + `">Open original link</a>`)
 			} else {

@@ -81,7 +81,7 @@ func TestExportEPUBCLI(t *testing.T) {
 		im.Set(10, 10, color.RGBA{R: 255, A: 255})
 		require.NoError(t, png.Encode(photo, im))
 		require.NoError(t, photo.Close())
-		first := `<h1>First</h1><p>αβ café</p><a href="images/photo.png">A figure in the next chapter</a><a href="20260102_120000_second%20post.html#section%20one">Next chapter</a><a href="` + trap.URL + `/source">Original</a><audio src="podcasts/episode.mp3"><img src="` + trap.URL + `/ignored-media-fallback.png"></audio><a href="` + trap.URL + `/watch"><video><source src="` + trap.URL + `/video.mp4"></video></a><a href="files/report.pdf">Report</a><iframe src="` + trap.URL + `/embed"></iframe><button><img src="` + trap.URL + `/ignored-button.png"><a id="ignored-id">Ignore</a></button><script>bad()</script>`
+		first := `<h1>First</h1><p>αβ café</p><a href="images/photo.png">A figure in the next chapter</a><a href="20260102_120000_second%20post.html#section%20one">Next chapter</a><a href="` + trap.URL + `/source">Original</a><a href="` + trap.URL + `/plain">video</a><audio src="podcasts/episode.mp3"><img src="` + trap.URL + `/ignored-media-fallback.png"></audio><a href="` + trap.URL + `/watch"><figure><video><source src="` + trap.URL + `/video.mp4"></video><figcaption>A linked video card</figcaption></figure></a><a href="files/report.pdf"><div>Report</div></a><iframe src="` + trap.URL + `/embed"></iframe><button><img src="` + trap.URL + `/ignored-button.png"><a id="ignored-id">Ignore</a></button><script>bad()</script>`
 		second := `<h1>Second</h1><h2 id="section one">A section</h2><a href="#section%20one">Same section</a><blockquote><p>A quotation</p></blockquote><a id="new-anchor" name="legacy-anchor"></a><a href="#legacy-anchor">Legacy anchor</a><picture><source srcset="` + trap.URL + `/unused.png"><img src="images/photo.png" alt="A photo" onload="bad()"></picture>`
 		require.NoError(t, os.WriteFile(filepath.Join(dir, "20260101_120000_first.html"), []byte(first), 0644))
 		require.NoError(t, os.WriteFile(filepath.Join(dir, "20260102_120000_second post.html"), []byte(second), 0644))
@@ -99,12 +99,13 @@ func TestExportEPUBCLI(t *testing.T) {
 		require.Contains(t, files["EPUB/chapter-2.xhtml"], `href="#id-1"`)
 		require.Contains(t, files["EPUB/chapter-2.xhtml"], `href="#id-2"`)
 		require.Contains(t, chapter, `href="`+trap.URL+`/source"`)
+		require.Contains(t, chapter, `href="`+trap.URL+`/plain">video</a>`)
 		require.Contains(t, chapter, `href="`+trap.URL+`/video.mp4"`)
 		require.Contains(t, chapter, `href="`+trap.URL+`/watch"`)
 		require.Contains(t, chapter, `href="`+trap.URL+`/embed"`)
 		require.Contains(t, chapter, "Report")
 		require.Contains(t, chapter, "unavailable in this book")
-		for _, forbidden := range []string{"<script", "onload", "srcset", "<audio", "<video", "<iframe", `href="files/`, `src="podcasts/`} {
+		for _, forbidden := range []string{"<script", "onload", "srcset", "<audio", "<video", "<iframe", "ignored-media-fallback.png", "ignored-button.png", `href="files/`, `src="podcasts/`} {
 			require.NotContains(t, chapter, forbidden)
 		}
 		require.Zero(t, requests.Load())
