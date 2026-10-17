@@ -114,10 +114,13 @@ func ExportEPUB(ctx context.Context, options EPUBOptions) error {
 		if err := write("META-INF/container.xml", `<?xml version="1.0" encoding="UTF-8"?><container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="EPUB/package.opf" media-type="application/oebps-package+xml"/></rootfiles></container>`); err != nil {
 			return err
 		}
-		content := &epubContent{ctx: ctx, dir: options.Input, chapters: map[string]*epubChapter{}, images: map[string]epubImage{}, inputs: inputs, write: write}
+		content := &epubContent{ctx: ctx, dir: options.Input, chapters: map[string]*epubChapter{}, images: map[string]*epubImage{}, inputs: inputs, write: write}
 		for _, chapter := range chapters {
 			content.chapters[chapter.entry.FilePath] = chapter
 			content.inputs[chapter.entry.FilePath] = true
+		}
+		if err := content.prepareImages(chapters); err != nil {
+			return err
 		}
 		var manifest, spine, nav strings.Builder
 		for i, chapter := range chapters {

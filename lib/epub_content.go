@@ -27,7 +27,7 @@ type epubChapter struct {
 }
 
 type epubImage struct {
-	name, mediaType string
+	name, mediaType, target string
 }
 
 // epubContent converts archived HTML to static XHTML and packages the local
@@ -36,8 +36,8 @@ type epubContent struct {
 	ctx       context.Context
 	dir       string
 	chapters  map[string]*epubChapter
-	images    map[string]epubImage
-	resources []epubImage
+	images    map[string]*epubImage
+	resources []*epubImage
 	inputs    map[string]bool
 	write     func(string, string) error
 }
@@ -82,6 +82,10 @@ func prepareEPUBChapters(entries []ArchiveEntry) ([]*epubChapter, error) {
 				}
 				chapter.ids[original] = id
 			}
+			if n.Data == "img" && epubAttr(n, "id") == "" {
+				nextID++
+				n.Attr = append(n.Attr, html.Attribute{Key: "id", Val: fmt.Sprintf("id-%d", nextID)})
+			}
 		})
 		chapters = append(chapters, chapter)
 	}
@@ -89,14 +93,44 @@ func prepareEPUBChapters(entries []ArchiveEntry) ([]*epubChapter, error) {
 }
 
 func walkEPUBReadingNodes(n *html.Node, visit func(*html.Node)) {
-	switch n.Data {
-	case "head", "script", "style", "noscript", "audio", "video", "iframe", "embed", "object", "source":
+	if epubDiscardedElement(n.Data) || epubMediaElement(n.Data) {
 		return
 	}
 	visit(n)
 	for child := n.FirstChild; child != nil; child = child.NextSibling {
 		walkEPUBReadingNodes(child, visit)
 	}
+}
+
+func epubDiscardedElement(tag string) bool {
+	switch tag {
+	case "head", "script", "style", "noscript", "source", "meta", "link", "input", "button":
+		return true
+	}
+	return false
+}
+
+func epubMediaElement(tag string) bool {
+	switch tag {
+	case "audio", "video", "iframe", "embed", "object":
+		return true
+	}
+	return false
+}
+
+func epubHasMedia(n *html.Node) bool {
+	if epubDiscardedElement(n.Data) {
+		return false
+	}
+	if epubMediaElement(n.Data) {
+		return true
+	}
+	for child := n.FirstChild; child != nil; child = child.NextSibling {
+		if epubHasMedia(child) {
+			return true
+		}
+	}
+	return false
 }
 
 func walkEPUBNodes(n *html.Node, visit func(*html.Node)) {
@@ -149,6 +183,7 @@ func (c *epubContent) addImage(raw string) (string, error) {
 	if cached, ok := c.images[raw]; ok {
 		return cached.name, nil
 	}
+	original, alias := raw, ""
 	var data []byte
 	if strings.HasPrefix(raw, "data:image/") {
 		parts := strings.SplitN(raw, ",", 2)
@@ -166,6 +201,7 @@ func (c *epubContent) addImage(raw string) (string, error) {
 			return "", fmt.Errorf("required image %q is not local; prepare the HTML archive with --download-images before exporting", raw)
 		}
 		c.inputs[path] = true
+		alias = path
 		resolved, err := filepath.EvalSymlinks(path)
 		if err != nil {
 			return "", fmt.Errorf("required image %q is missing or unreadable; prepare the HTML archive with --download-images: %w", raw, err)
@@ -179,6 +215,7 @@ func (c *epubContent) addImage(raw string) (string, error) {
 			return "", fmt.Errorf("required image %q is not a readable regular file", raw)
 		}
 		if cached, ok := c.images[resolved]; ok {
+			c.images[original], c.images[alias] = cached, cached
 			return cached.name, nil
 		}
 		data, err = os.ReadFile(resolved)
@@ -202,11 +239,15 @@ func (c *epubContent) addImage(raw string) (string, error) {
 	if kind == "jpeg" {
 		extension = "jpg"
 	}
-	resource := epubImage{name: fmt.Sprintf("images/image-%d.%s", len(c.resources)+1, extension), mediaType: mediaType}
+	resource := &epubImage{name: fmt.Sprintf("images/image-%d.%s", len(c.resources)+1, extension), mediaType: mediaType}
 	if err := c.write("EPUB/"+resource.name, string(data)); err != nil {
 		return "", err
 	}
 	c.images[raw] = resource
+	c.images[original] = resource
+	if alias != "" {
+		c.images[alias] = resource
+	}
 	c.resources = append(c.resources, resource)
 	return resource.name, nil
 }
@@ -237,22 +278,32 @@ func (c *epubContent) link(chapter *epubChapter, raw string) string {
 		return link
 	}
 	if resource, ok := c.images[path]; ok {
-		return resource.name
+		return resource.target
 	}
 	return ""
 }
 
-func (c *epubContent) render(chapter *epubChapter) (string, error) {
-	// Register images first, so links to a reading image work regardless of order.
-	var imageErr error
-	walkEPUBReadingNodes(chapter.doc, func(n *html.Node) {
-		if imageErr == nil && n.Type == html.ElementNode && n.Data == "img" {
-			_, imageErr = c.addImage(epubAttr(n, "src"))
+func (c *epubContent) prepareImages(chapters []*epubChapter) error {
+	// Discover resources for the whole book before resolving any ordinary links.
+	for _, chapter := range chapters {
+		var imageErr error
+		walkEPUBReadingNodes(chapter.doc, func(n *html.Node) {
+			if imageErr == nil && n.Type == html.ElementNode && n.Data == "img" {
+				raw := epubAttr(n, "src")
+				_, imageErr = c.addImage(raw)
+				if imageErr == nil && c.images[raw].target == "" {
+					c.images[raw].target = chapter.name + "#" + epubAttr(n, "id")
+				}
+			}
+		})
+		if imageErr != nil {
+			return fmt.Errorf("post %s: %w", filepath.Base(chapter.entry.FilePath), imageErr)
 		}
-	})
-	if imageErr != nil {
-		return "", fmt.Errorf("post %s: %w", filepath.Base(chapter.entry.FilePath), imageErr)
 	}
+	return nil
+}
+
+func (c *epubContent) render(chapter *epubChapter) (string, error) {
 	var out strings.Builder
 	var render func(*html.Node) error
 	render = func(n *html.Node) error {
@@ -267,12 +318,13 @@ func (c *epubContent) render(chapter *epubChapter) (string, error) {
 			return nil
 		}
 		tag := n.Data
-		switch tag {
-		case "head", "script", "style", "noscript", "source", "meta", "link", "input", "button":
+		if epubDiscardedElement(tag) {
 			return nil
-		case "svg":
+		}
+		if tag == "svg" {
 			return fmt.Errorf("post %s contains an unsupported inline SVG; use a local PNG preview", filepath.Base(chapter.entry.FilePath))
-		case "audio", "video", "iframe", "embed", "object":
+		}
+		if epubMediaElement(tag) {
 			var links []string
 			seen := map[string]bool{}
 			walkEPUBNodes(n, func(child *html.Node) {
@@ -296,8 +348,12 @@ func (c *epubContent) render(chapter *epubChapter) (string, error) {
 			return nil
 		}
 		allowed := epubAllowedTags[tag]
+		var href string
+		mediaAnchor := false
 		if tag == "a" {
-			if href := c.link(chapter, epubAttr(n, "href")); href != "" {
+			href = c.link(chapter, epubAttr(n, "href"))
+			mediaAnchor = epubHasMedia(n)
+			if href != "" && !mediaAnchor {
 				out.WriteString(`<a href="` + epubEscape(href) + `"`)
 			} else {
 				tag = "span"
@@ -327,7 +383,11 @@ func (c *epubContent) render(chapter *epubChapter) (string, error) {
 			}
 		}
 		if n.Data == "a" && tag == "span" && epubAttr(n, "href") != "" {
-			out.WriteString(" (unavailable in this book)")
+			if mediaAnchor && href != "" {
+				out.WriteString(` <a href="` + epubEscape(href) + `">Open original link</a>`)
+			} else {
+				out.WriteString(" (unavailable in this book)")
+			}
 		}
 		if allowed {
 			out.WriteString("</" + tag + ">")
