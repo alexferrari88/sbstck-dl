@@ -149,9 +149,11 @@ func TestEmbedMediaInFileAtomicPreservation(t *testing.T) {
 	path := filepath.Join(dir, "post.html")
 	original := "<!DOCTYPE html>\n<h1>User title</h1>\n\n<p>Locally edited &amp; retained.</p>\n"
 	require.NoError(t, os.WriteFile(path, []byte(original), 0600))
+	before, err := os.Stat(path)
+	require.NoError(t, err)
 	media := EmbeddedMedia{Podcast: "podcasts/ep_preview.mp3"}
 	failure := errors.New("interrupted publication")
-	err := embedMediaInFileWith(path, "", media, func(path string, data []byte) error {
+	err = embedMediaInFileWith(path, "", media, func(path string, data []byte) error {
 		return writeFileAtomicallyWith(path, func(f *os.File) error { _, err := f.Write(data[:10]); require.NoError(t, err); return failure })
 	})
 	require.ErrorIs(t, err, failure)
@@ -168,7 +170,7 @@ func TestEmbedMediaInFileAtomicPreservation(t *testing.T) {
 	require.Contains(t, string(first), "<p>Locally edited &amp; retained.</p>\n")
 	info, err := os.Stat(path)
 	require.NoError(t, err)
-	require.Equal(t, os.FileMode(0600), info.Mode().Perm())
+	require.Equal(t, before.Mode().Perm(), info.Mode().Perm())
 	require.NoError(t, EmbedMediaInFile(path, "", media))
 	second, err := os.ReadFile(path)
 	require.NoError(t, err)
