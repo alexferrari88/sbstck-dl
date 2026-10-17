@@ -1,13 +1,17 @@
 # Current work
 
-Goal: finish triage of issue #21 and publish an agent-ready brief for EPUB export. Implementation is not part of this task.
+Goal: finish triage of issue #21 and publish an agent-ready brief for EPUB export. Triage is complete; implementation was not part of this task.
 
-Status: enhancement / needs-triage / priority:P3. Maintainer accepted EPUB first with PDF deferred, one book containing selected posts as chapters, a table of contents, and embedded images. The next round accepted offline export from an existing HTML archive, KOReader as the reference reader alongside automated EPUB validation, and failure on missing required posts/images while preserving any previous EPUB. Audio, video, and attachments remain links.
+Status: the brief is posted and GitHub verifies the issue is open with exactly enhancement / ready-for-agent / priority:P3. Authoritative brief: https://github.com/alexferrari88/sbstck-dl/issues/21#issuecomment-6239626967.
+
+Agreed scope: EPUB first, PDF deferred. Export one existing local HTML archive offline as one book, with every eligible post as a chapter, a table of contents, and embedded reading images. Order oldest first, unknown dates last, filename ascending for ties. Require a book title; author/language are optional, unknown author is omitted, and language defaults to undetermined (`und`). Missing required posts/images or publication failures must fail clearly and preserve a previous EPUB. Source archives remain unchanged.
+
+Media and acceptance: preserve known web/source links; audio/video/attachments are not bundled. Local-only media destinations with no known online URL become clear notes rather than broken links. KOReader is the reference reader alongside automated EPUB validation; actual reader verification remains an implementation acceptance check. Date filters and individual post selection are deferred.
 
 Verified: current post conversion, CLI formats, archive restoration, and index generation support only HTML, Markdown, and text. No prior rejection was found. Archive metadata retains post titles/dates and cover references, but does not retain author, language, or canonical source URLs; legacy HTML may contain source links only if downloaded with that option. No EPUB implementation or reader check has been performed.
 
-Pending decisions: which local posts enter the book and their reading order; book title/author/language and treatment of unavailable source metadata. Capture the final scope, then post the brief and move #21 to ready-for-agent while retaining enhancement and priority:P3.
+Decisions: the maintainer explicitly accepted the final selection, ordering, metadata, and link-handling defaults. The posted brief supersedes the earlier triage notes; no open scope decisions remain. EPUB and reader behavior have not been implemented or tested.
 
-Next action: confirm the remaining selection and metadata defaults with the maintainer, then finish triage without starting implementation.
+Next action: none for triage. Future implementation should follow the authoritative issue brief and report any unavailable KOReader acceptance check as pending.
 
 Previous work: v0.9.0 publication is complete and verified: https://github.com/alexferrari88/sbstck-dl/releases/tag/v0.9.0. Native validation and asset publication succeeded in https://github.com/alexferrari88/sbstck-dl/actions/runs/39059798050.
