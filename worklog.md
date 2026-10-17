@@ -1,13 +1,15 @@
 # Current work
 
-Goal: triage issue #31, reproduce the reported post-data extraction error, and publish an actionable agent brief.
+Goal: implement issue #31, restoring post extraction for Substack's JSON-script preload layout while retaining legacy support.
 
-Status: triage complete. Issue #31 is open with bug, ready-for-agent, and priority:P1. Findings and the agent brief are posted at https://github.com/alexferrari88/sbstck-dl/issues/31#issuecomment-6238622910. No implementation or release was performed.
+Status: implementation, validation, and the two-axis review are complete. Code commit: f6b0dc7310e4e8fdaf3c7ddf845210946002006f. The contract and original reproduction are https://github.com/alexferrari88/sbstck-dl/issues/31#issuecomment-6238622910. No release was published.
 
-Verified cause: the reported publications serve post data in script#preloads-json[type="application/json"], loaded through JSON.parse(document.querySelector(...).textContent). The existing extractJSONString expects the older inline escaped-string form. Both layouts contain usable post JSON, but only the older container is supported.
+Changes: JSON-script preloads are decoded directly; legacy inline strings are unescaped once. Legacy parsing selects the window._preloads assignment rather than unrelated analytics or later JSON.parse calls. Missing, null, empty, and malformed post data return errors. Existing post/native-media metadata and subtitle/cover fallback behavior are preserved.
 
-Evidence: the SHA-256-verified v0.8.1 Linux release and current main (574a2ee63037be026bf5e98ecaeb1849a6e79bb9, Go 1.27.2/Linux) reproduce the exact error on https://letters.thedankoe.com/p/full-course-how-to-turn-your-interests. Current main also reproduces it on https://nateszerotoai.substack.com/p/ai-presentation-prompts without authentication. Both responses are HTTP 200 with valid post JSON. Captured-response and minimal-layout replays fail twice per post; the same payload in the legacy layout succeeds twice and preserves post ID, slug, and body HTML. Focused TestExtractJSONString and TestExtractorExtractPost tests pass but miss the new layout. Authenticated paid-body access and Windows execution were not tested. No reporter credential was used or retained in project files.
+Regression evidence: the public Extractor.ExtractPost fixture and actual CLI Markdown/archive tests fail against baseline 63a4a724ab898ff48dfde971d5f7e55dbdc1cce4 and pass with the fix. Fixtures cover both layouts, quotes, backslashes, literal escapes, line breaks, Unicode, analytics, missing/malformed data, native-media metadata, and HTML metadata fallbacks. Invalid CLI inputs cannot publish a post or index.
 
-Scope for subsequent implementation: support both preload containers without double unescaping or evaluating JavaScript; preserve post/native-media metadata and subtitle/cover fallbacks; reject absent or malformed post data; cover actual CLI Markdown/archive output with deterministic fixtures and recheck the live public example. The posted brief is the implementation contract. Cookie redesign, access bypass, unrelated discovery/archive/media changes, and release publication are out of scope.
+Validation: go test ./... -count=1 passes (cmd 21.276s, lib 40.612s); go test -race ./... -count=1 passes (cmd 21.984s, lib 96.488s). go vet ./..., Linux amd64 and Windows amd64 builds with CGO disabled, formatting, and diff checks pass. Standards review: no findings. Spec/correctness review: no findings.
 
-Next action: implement the posted brief when requested; triage itself has no outstanding blocker.
+Live evidence: the fixed CLI successfully downloads and indexes https://letters.thedankoe.com/p/full-course-how-to-turn-your-interests as Markdown (40,967 bytes). The anonymous preview at https://nateszerotoai.substack.com/p/ai-presentation-prompts also downloads and indexes (1,798 bytes). These are separate from deterministic fixture checks. Authenticated full paid-body access and native Windows execution remain unverified. No reporter credential was used or retained in project files.
+
+Next action: none for this implementation. A new binary release is a separate task following docs/agents/releases.md; v0.8.1 does not contain this fix.
