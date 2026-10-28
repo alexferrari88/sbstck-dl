@@ -1,11 +1,15 @@
 # Current work
 
-Goal: implement issue #32, an opening table of contents page in exported EPUB books.
+Goal: implement issue #32, an opening table of contents page in exported EPUB books. Complete.
 
-Spec: https://github.com/alexferrari88/sbstck-dl/issues/32#issuecomment-6471224386. The reporter confirmed the reader contents panel works on Windows; the request is for a visible contents page before the oldest chapter. Preserve chapter ordering, existing reader navigation, single-post exports, offline portability, metadata, and atomic publication.
+Spec: https://github.com/alexferrari88/sbstck-dl/issues/32#issuecomment-6471224386. The reporter confirmed existing reader navigation works on Windows; the requested addition is a visible contents page before the oldest chapter.
 
-Status: implementation in isolated branch `codex/issue-32-opening-contents`. CLI regression checks first failed on the baseline because the reading order contained only chapters. The existing navigation document now appears first in that order and has an explicit Table of contents heading. README documents the default behavior and re-exporting older books.
+Implementation: reuse the existing EPUB navigation document as the first linear reading item and label it Table of contents. Existing chapter order, reader navigation, metadata, single-post exports, offline operation, and atomic publication behavior are preserved. README explains the default behavior, Calibre's contents shortcut, restored reading positions, and re-exporting older books.
 
-Validation: in progress. Use the accepted CLI seam to inspect actual exported package reading order and contents destinations. Run EPUBCheck 5.4.0, Calibre 9.16 and KOReader desktop checks with a moved book and isolated networking, relevant race checks, vet, and the full Go suite. Independent standards/spec reviews follow against starting commit 0860c89.
+Automated validation: final full `go test ./... -count=1` passed with EPUBCHECK_JAR set to the SHA-256-verified EPUBCheck 5.4.0 distribution pinned in CI. Focused EPUB race tests, vet, formatting, and diff checks passed. CLI regressions inspect actual package reading order, navigation semantics, unique and correct chapter destinations, single-post output, Unicode, and XML-sensitive titles. They failed on the baseline; a deliberate duplicated-destination mutation was also detected, then restored. The representative book passed EPUBCheck with zero errors or warnings.
 
-Next action: complete validation and reviews, integrate and push main with verified remote parity, then close #32. Release publication is outside this implementation task.
+Reader acceptance: Calibre 9.16 and KOReader desktop v2026.07.1 were run in distinct network namespaces without network routes, using a fresh export after the source archive was moved from its original location. Fresh profiles opened at the contents page; normal paging reached the oldest chapter next; the opening page's second-chapter link and each reader's contents-panel link opened the correct chapters. Screenshots were visually checked. This is Linux desktop-reader evidence, not a physical e-reader or new Windows acceptance test. Local evidence: /tmp/sbstck-issue32/acceptance/ (opening.epub under books; calibre-*.png and koreader-*.png captures).
+
+Review: independent standards and spec reviews against starting commit 0860c89. Standards found no issues. Spec review identified a destination-identity coverage gap, fixed in ea2c78d and re-reviewed with zero outstanding findings. Runtime change is in 0ffe25d.
+
+Next action: none for implementation. Publish through the gated release workflow when requested; this task does not publish a release or change existing release assets.
