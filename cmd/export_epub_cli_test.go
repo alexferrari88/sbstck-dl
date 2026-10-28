@@ -232,10 +232,19 @@ func requireEPUBContentsFirst(t *testing.T, files map[string]string, titles []st
 	require.Equal(t, "toc", nav.Nav.Type)
 	require.Equal(t, "Table of contents", nav.Nav.Heading)
 	require.Len(t, nav.Nav.Links, len(titles))
+	seen := make(map[string]bool)
 	for i, link := range nav.Nav.Links {
 		require.Equal(t, titles[i], link.Title)
 		require.Equal(t, hrefs[pkg.Spine[i+1].IDRef], link.Href, "contents must follow chapter reading order")
-		require.NotEmpty(t, files[path.Join("EPUB", link.Href)], "contents destination must exist")
+		require.False(t, seen[link.Href], "each post must have its own contents destination")
+		seen[link.Href] = true
+		chapter := files[path.Join("EPUB", link.Href)]
+		require.NotEmpty(t, chapter, "contents destination must exist")
+		var target struct {
+			Heading string `xml:"body>h1"`
+		}
+		require.NoError(t, xml.Unmarshal([]byte(chapter), &target))
+		require.Equal(t, titles[i], target.Heading, "contents must open the corresponding post")
 	}
 }
 
