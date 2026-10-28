@@ -1,6 +1,8 @@
 # Current work
 
-Goal: implement issue #32, an opening table of contents page in exported EPUB books. Complete.
+Goal: publish v0.10.1 through the gated release workflow, including issue #32's completed opening EPUB contents page.
+
+Release status: preparing the version/source commit and custom-notes draft. Native Linux/macOS/Windows validation, uploaded-asset verification, publication, and independent public-download checks are pending. Use the exact full source SHA and matching v0.10.1 tag; publication must happen only through the final workflow gate.
 
 Spec: https://github.com/alexferrari88/sbstck-dl/issues/32#issuecomment-6471224386. The reporter confirmed existing reader navigation works on Windows; the requested addition is a visible contents page before the oldest chapter.
 
@@ -12,4 +14,4 @@ Reader acceptance: Calibre 9.16 and KOReader desktop v2026.07.1 were run in dist
 
 Review: independent standards and spec reviews against starting commit 0860c89. Standards found no issues. Spec review identified a destination-identity coverage gap, fixed in ea2c78d and re-reviewed with zero outstanding findings. Runtime change is in 0ffe25d.
 
-Next action: none for implementation. Publish through the gated release workflow when requested; this task does not publish a release or change existing release assets.
+Next action: validate the version and publication-gate tests locally, commit/push, create only an unpublished draft targeting the source SHA, and dispatch the native release workflow. Preserve all existing published releases.
