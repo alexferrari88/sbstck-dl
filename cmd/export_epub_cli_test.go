@@ -11,8 +11,10 @@ import (
 	"net/http/httptest"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -145,6 +147,7 @@ func TestExportEPUBCLI(t *testing.T) {
 		require.NoError(t, err, "%s", out)
 		files := readEPUB(t, book)
 		nav := files["EPUB/nav.xhtml"]
+		requireEPUBContentsFirst(t, files, []string{"Oldest", "Tie A", "Tie B", "Newest", "Unknown A", "Unknown Z"})
 		last := -1
 		for _, title := range []string{"Oldest", "Tie A", "Tie B", "Newest", "Unknown A", "Unknown Z"} {
 			position := strings.Index(nav, ">"+title+"</a>")
@@ -166,6 +169,7 @@ func TestExportEPUBCLI(t *testing.T) {
 		require.NoError(t, err, "%s", out)
 		require.Contains(t, out, book)
 		files := readEPUB(t, book)
+		requireEPUBContentsFirst(t, files, []string{"A café & a story"})
 		require.Equal(t, "application/epub+zip", files["mimetype"])
 		require.Contains(t, files["EPUB/package.opf"], "Collected &amp; selected")
 		require.Contains(t, files["EPUB/package.opf"], "<dc:language>und</dc:language>")
@@ -182,6 +186,57 @@ func TestExportEPUBCLI(t *testing.T) {
 			require.NoError(t, err, "EPUBCheck: %s", out)
 		}
 	})
+}
+
+func requireEPUBContentsFirst(t *testing.T, files map[string]string, titles []string) {
+	t.Helper()
+	var pkg struct {
+		XMLName  xml.Name `xml:"http://www.idpf.org/2007/opf package"`
+		Manifest []struct {
+			ID         string `xml:"id,attr"`
+			Href       string `xml:"href,attr"`
+			Properties string `xml:"properties,attr"`
+		} `xml:"manifest>item"`
+		Spine []struct {
+			IDRef  string `xml:"idref,attr"`
+			Linear string `xml:"linear,attr"`
+		} `xml:"spine>itemref"`
+	}
+	require.NoError(t, xml.Unmarshal([]byte(files["EPUB/package.opf"]), &pkg))
+	require.Len(t, pkg.Spine, len(titles)+1, "contents must precede all post chapters")
+	var navName string
+	hrefs := make(map[string]string)
+	for _, item := range pkg.Manifest {
+		hrefs[item.ID] = item.Href
+		if slices.Contains(strings.Fields(item.Properties), "nav") {
+			require.Empty(t, navName, "one navigation document")
+			navName = item.Href
+		}
+	}
+	require.NotEmpty(t, navName)
+	require.Equal(t, navName, hrefs[pkg.Spine[0].IDRef], "open at the contents page")
+	for _, item := range pkg.Spine {
+		require.Contains(t, []string{"", "yes"}, item.Linear, "contents and chapters belong in normal reading order")
+	}
+	var nav struct {
+		Nav struct {
+			Type    string `xml:"http://www.idpf.org/2007/ops type,attr"`
+			Heading string `xml:"h1"`
+			Links   []struct {
+				Title string `xml:",chardata"`
+				Href  string `xml:"href,attr"`
+			} `xml:"ol>li>a"`
+		} `xml:"body>nav"`
+	}
+	require.NoError(t, xml.Unmarshal([]byte(files[path.Join("EPUB", navName)]), &nav))
+	require.Equal(t, "toc", nav.Nav.Type)
+	require.Equal(t, "Table of contents", nav.Nav.Heading)
+	require.Len(t, nav.Nav.Links, len(titles))
+	for i, link := range nav.Nav.Links {
+		require.Equal(t, titles[i], link.Title)
+		require.Equal(t, hrefs[pkg.Spine[i+1].IDRef], link.Href, "contents must follow chapter reading order")
+		require.NotEmpty(t, files[path.Join("EPUB", link.Href)], "contents destination must exist")
+	}
 }
 
 func readEPUB(t *testing.T, path string) map[string]string {

@@ -123,6 +123,7 @@ func ExportEPUB(ctx context.Context, options EPUBOptions) error {
 			return err
 		}
 		var manifest, spine, nav strings.Builder
+		spine.WriteString(`<itemref idref="nav"/>`)
 		for i, chapter := range chapters {
 			entry := chapter.entry
 			if err := ctx.Err(); err != nil {
@@ -160,7 +161,7 @@ func ExportEPUB(ctx context.Context, options EPUBOptions) error {
 		if err := write("EPUB/package.opf", packageXML); err != nil {
 			return err
 		}
-		if err := write("EPUB/nav.xhtml", epubXHTML(options.Title, options.Language, `<nav epub:type="toc"><h1>`+epubEscape(options.Title)+`</h1><ol>`+nav.String()+`</ol></nav>`)); err != nil {
+		if err := write("EPUB/nav.xhtml", epubXHTML(options.Title, options.Language, `<nav epub:type="toc"><h1>Table of contents</h1><ol>`+nav.String()+`</ol></nav>`)); err != nil {
 			return err
 		}
 		if err := z.Close(); err != nil {
