@@ -323,15 +323,19 @@ func runDownload(cmd *cobra.Command, args []string) error {
 		// added beside existing outputs, their media is already local.
 		jsonOnly := len(formats) == 1 && formats[0] == "json"
 		filesSupported, imagesNeeded := jsonOnly, jsonOnly
+		// HTML and Markdown link local media; HEIC previews also serve
+		// archive covers taken from the body.
+		previews := archiveWorkflow != nil
 		for _, selected := range missing {
 			if selected != "txt" && selected != "json" {
 				filesSupported = true
+				previews = true
 			}
 			if selected != "json" {
 				imagesNeeded = true
 			}
 		}
-		prepared, images, mediaErr := post.PrepareMedia(ctx, outputFolder, downloadImages && imagesNeeded, lib.ImageQuality(imageQuality), imagesDir, downloadFiles && filesSupported, extensions, filesDir, mediaFetcher)
+		prepared, images, mediaErr := post.PrepareMedia(ctx, outputFolder, downloadImages && imagesNeeded, lib.ImageQuality(imageQuality), imagesDir, previews, downloadFiles && filesSupported, extensions, filesDir, mediaFetcher)
 		if mediaErr != nil {
 			if archiveWorkflow != nil {
 				archiveWorkflow.RecordPost(post, images, nil)

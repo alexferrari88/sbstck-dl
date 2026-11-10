@@ -84,7 +84,7 @@ func (id *ImageDownloader) localImage(ctx context.Context, source, path string) 
 		result.Error = fmt.Errorf("downloaded image is empty")
 		return result
 	}
-	if !needsHEICPreview(header, source, path) {
+	if id.noPreviews || !needsHEICPreview(header, source, path) {
 		result.Format = id.getImageFormat(filepath.Base(path))
 		result.Width, result.Height = id.extractDimensionsFromURL(source)
 		result.Success = ctx.Err() == nil

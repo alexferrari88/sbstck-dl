@@ -169,14 +169,19 @@ func (p *Post) fileContent(format string, addSourceURL bool) (string, error) {
 
 // PrepareMedia downloads and rewrites a canonical HTML body once for all outputs.
 // Plain text continues to render the original body, without local image links.
+// HEIC previews are made only when an output displays local images.
 func (p Post) PrepareMedia(ctx context.Context, outputDir string,
-	downloadImages bool, imageQuality ImageQuality, imagesDir string,
+	downloadImages bool, imageQuality ImageQuality, imagesDir string, previews bool,
 	downloadFiles bool, fileExtensions []string, filesDir string, fetcher *Fetcher) (Post, *ImageDownloadResult, error) {
 	prepared := p
 	var images *ImageDownloadResult
 	if downloadImages {
 		var err error
-		images, err = NewImageDownloader(fetcher, outputDir, imagesDir, imageQuality).DownloadImages(ctx, prepared.BodyHTML, p.Slug)
+		downloader := NewImageDownloader(fetcher, outputDir, imagesDir, imageQuality)
+		if !previews {
+			downloader.WithoutPreviews()
+		}
+		images, err = downloader.DownloadImages(ctx, prepared.BodyHTML, p.Slug)
 		if err != nil {
 			return p, images, fmt.Errorf("failed to download images: %w", err)
 		}
@@ -205,7 +210,7 @@ func (p *Post) WriteToFileWithImages(ctx context.Context, path string, format st
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return nil, err
 	}
-	prepared, result, err := p.PrepareMedia(ctx, filepath.Dir(path), downloadImages, imageQuality, imagesDir,
+	prepared, result, err := p.PrepareMedia(ctx, filepath.Dir(path), downloadImages, imageQuality, imagesDir, format != "txt",
 		downloadFiles && format != "txt", fileExtensions, filesDir, fetcher)
 	if err != nil {
 		return result, err
