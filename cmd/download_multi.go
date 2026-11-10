@@ -250,6 +250,15 @@ func runDownload(cmd *cobra.Command, args []string) error {
 		}
 		urls = needed
 	}
+	var clipPublicationManifest *lib.MediaManifest
+	if !downloadClips && len(urls) > 0 && slices.Contains(formats, "html") {
+		clipPublicationManifest = manifest
+		if clipPublicationManifest == nil {
+			// Plain downloads can also invalidate known clip publication. An
+			// unreadable manifest is optional when no media work is requested.
+			clipPublicationManifest, _ = lib.LoadMediaManifest(outputFolder)
+		}
+	}
 	var bar *progressbar.ProgressBar
 	if !single && len(urls) > 0 {
 		bar = progressbar.NewOptions(len(urls), progressbar.OptionSetWidth(25), progressbar.OptionSetDescription("downloading"), progressbar.OptionShowBytes(true))
@@ -349,8 +358,8 @@ func runDownload(cmd *cobra.Command, args []string) error {
 				output = post
 			}
 			var writeErr error
-			if single && selected == "html" && !downloadClips {
-				writeErr = invalidatePostAudioClips(manifest, post.Slug)
+			if selected == "html" && clipPublicationManifest != nil {
+				writeErr = invalidatePostAudioClips(clipPublicationManifest, post.Slug)
 			}
 			if writeErr == nil {
 				writeErr = output.WriteToFile(path, selected, addSourceURL)

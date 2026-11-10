@@ -243,17 +243,9 @@ func completePostMedia(manifest *lib.MediaManifest, post lib.Post, status postMe
 	return nil
 }
 
-// invalidatePostAudioClips makes the clip players retryable before replacing
-// the saved HTML in a direct refresh.
+// invalidatePostAudioClips keeps clip publication retryable when writing HTML
+// without the clip players.
 func invalidatePostAudioClips(manifest *lib.MediaManifest, slug string) error {
-	if manifest == nil {
-		var err error
-		manifest, err = lib.LoadMediaManifest(outputFolder)
-		if err != nil {
-			// A plain refresh does not depend on a readable media manifest.
-			return nil
-		}
-	}
 	record := manifest.Posts[slug]
 	if record == nil {
 		return nil

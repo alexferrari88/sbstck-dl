@@ -346,6 +346,28 @@ func TestAudioClipsCLI(t *testing.T) {
 		require.True(t, complete(t, dir, "clips"))
 	})
 
+	t.Run("repairs clip players after a bulk HTML restore", func(t *testing.T) {
+		pub := newMediaCLIPublication(t)
+		pub.add("clips", map[string]any{"body_html": audioClipEmbed("clip-a")})
+		dir := t.TempDir()
+		path := filepath.Join(dir, stem+"clips.html")
+		out, err := run(t, pub.URL, dir, "--download-audio-clips")
+		require.NoError(t, err, out)
+		require.True(t, complete(t, dir, "clips"))
+
+		require.NoError(t, os.Remove(path))
+		out, err = run(t, pub.URL, dir)
+		require.NoError(t, err, out)
+		require.Contains(t, read(t, path), "native-audio-embed")
+		require.False(t, complete(t, dir, "clips"), "restoring HTML without clip players invalidates publication")
+
+		out, err = run(t, pub.URL, dir, "--download-audio-clips")
+		require.NoError(t, err, out)
+		require.Contains(t, read(t, path), `data-audio-clip-id="clip-a"`)
+		require.Equal(t, 1, pub.count("/cdn/audio.mp3"), "repair reuses the cached audio")
+		require.True(t, complete(t, dir, "clips"))
+	})
+
 	t.Run("a failed clip keeps the post pending", func(t *testing.T) {
 		pub := newMediaCLIPublication(t)
 		pub.add("clips", map[string]any{"body_html": body})
