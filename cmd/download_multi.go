@@ -211,7 +211,7 @@ func runDownload(cmd *cobra.Command, args []string) error {
 	// The media manifest records posts whose media is complete, so later runs
 	// can skip them
 	var manifest *lib.MediaManifest
-	if downloadPodcasts || downloadVideos {
+	if downloadPodcasts || downloadVideos || downloadClips {
 		manifest, err = lib.LoadMediaManifest(outputFolder)
 		if err != nil {
 			return fmt.Errorf("load media manifest: %w", err)

@@ -16,19 +16,25 @@ import (
 // EmbeddedMedia lists downloaded media to embed in post HTML, as URLs relative
 // to the post file.
 type EmbeddedMedia struct {
-	Podcast string            // podcast audio
-	Videos  map[string]string // videos by upload ID
+	Podcast    string            // podcast audio
+	Videos     map[string]string // videos by upload ID
+	AudioClips map[string]string // audio clips in the post text by upload ID
 }
 
 // videoPlaceholderPattern matches the empty elements Substack leaves in post
 // HTML for native videos.
 var videoPlaceholderPattern = regexp.MustCompile(`<div\b[^>]*\bnative-video-embed\b[^>]*>\s*</div>`)
 
+// audioClipPlaceholderPattern matches the empty elements Substack leaves in
+// post HTML for audio clips.
+var audioClipPlaceholderPattern = regexp.MustCompile(`<div\b[^>]*\bnative-audio-embed\b[^>]*>\s*</div>`)
+
 // Embedded elements are matched so that embedding again updates them, e.g.
 // once the full file replaces a preview.
 var (
 	embeddedVideoPattern   = regexp.MustCompile(`(?s)<video\b[^>]*\bdata-upload-id="([A-Za-z0-9-]+)"[^>]*>.*?</video>`)
 	embeddedPodcastPattern = regexp.MustCompile(`(?s)<audio\b[^>]*\bdata-podcast\b[^>]*>.*?</audio>`)
+	embeddedClipPattern    = regexp.MustCompile(`(?s)<audio\b[^>]*\bdata-audio-clip-id="([A-Za-z0-9-]+)"[^>]*>.*?</audio>`)
 )
 
 // EmbedMedia embeds downloaded media in post HTML, as players of the local
@@ -52,6 +58,20 @@ func EmbedMedia(postHTML, postVideoID string, media EmbeddedMedia) string {
 	})
 	postHTML = videoPlaceholderPattern.ReplaceAllStringFunc(postHTML, func(match string) string {
 		return embed(match, placeholderUploadID(match))
+	})
+
+	// Audio clips are played where they appear in the text.
+	embedClip := func(match, uploadID string) string {
+		if src, ok := media.AudioClips[uploadID]; ok {
+			return audioClipElement(uploadID, src)
+		}
+		return match
+	}
+	postHTML = embeddedClipPattern.ReplaceAllStringFunc(postHTML, func(match string) string {
+		return embedClip(match, embeddedClipPattern.FindStringSubmatch(match)[1])
+	})
+	postHTML = audioClipPlaceholderPattern.ReplaceAllStringFunc(postHTML, func(match string) string {
+		return embedClip(match, placeholderUploadID(match))
 	})
 
 	if media.Podcast != "" {
@@ -102,6 +122,14 @@ func podcastElement(src string) string {
 		`<a href="%s">Download audio</a></audio>`, src, src)
 }
 
+// audioClipElement returns an audio element playing the clip at src, with a
+// download link for browsers that can't play it.
+func audioClipElement(uploadID, src string) string {
+	src = html.EscapeString(src)
+	return fmt.Sprintf(`<audio data-audio-clip-id="%s" controls preload="metadata" src="%s" style="width: 100%%">`+
+		`<a href="%s">Download audio</a></audio>`, html.EscapeString(uploadID), src, src)
+}
+
 // relativeURL returns path relative to dir as a URL for HTML files in dir to
 // reference.
 func relativeURL(dir, path string) (string, bool) {
@@ -123,7 +151,7 @@ func EmbedMediaInFile(path, postVideoID string, media EmbeddedMedia) error {
 }
 
 func embedMediaInFileWith(path, postVideoID string, media EmbeddedMedia, publish func(string, []byte) error) error {
-	if media.Podcast == "" && len(media.Videos) == 0 {
+	if media.Podcast == "" && len(media.Videos) == 0 && len(media.AudioClips) == 0 {
 		return nil
 	}
 	info, err := os.Lstat(path)

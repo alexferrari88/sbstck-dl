@@ -386,7 +386,9 @@ func (p *mediaCLIPublication) add(slug string, input map[string]any) {
 	data["canonical_url"] = p.URL + "/p/" + slug
 	data["post_date"] = "2025-01-02T03:04:05Z"
 	data["title"] = slug
-	data["body_html"] = "<p>body of " + slug + "</p>"
+	if data["body_html"] == nil {
+		data["body_html"] = "<p>body of " + slug + "</p>"
+	}
 	if data["audience"] == nil {
 		data["audience"] = "everyone"
 	}

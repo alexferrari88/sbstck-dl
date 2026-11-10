@@ -65,7 +65,7 @@ Date filters use sitemap `lastmod` when a valid sitemap exists and publication `
 
 When downloading the full archive, if the downloader is interrupted, at the next execution it will resume the download of the remaining posts.
 
-With `--download-podcasts` or `--download-videos`, posts that were already downloaded are revisited to fetch their media, without rewriting their post bodies. This lets you add media to an existing download. `.sbstck-dl-media.json` records completed media work only after the media file and its requested output have been published successfully. For existing posts, this includes embedding in HTML; newly written selected outputs include their media references. Existing Markdown files are retained without modification. If embedding or manifest reading/writing fails, the command returns a nonzero status and a later run retries unfinished work, reusing valid downloaded media when possible. Delete the manifest to have every post checked again.
+With `--download-podcasts`, `--download-videos`, or `--download-audio-clips`, posts that were already downloaded are revisited to fetch their media, without rewriting their post bodies. This lets you add media to an existing download. `.sbstck-dl-media.json` records completed media work only after the media file and its requested output have been published successfully. For existing posts, this includes embedding in HTML; newly written selected outputs include their media references. Existing Markdown files are retained without modification. If embedding or manifest reading/writing fails, the command returns a nonzero status and a later run retries unfinished work, reusing valid downloaded media when possible. Delete the manifest to have every post checked again.
 
 Existing HTML posts are updated with atomic publication that preserves unrelated user edits and file permissions. Cached downloads count as complete only when they are regular, nonempty, nonsymlink files. Missing or empty files are retried; invalid non-file destinations are reported and left intact. Unexpected transport, storage, embedding, or manifest errors produce warnings and a nonzero command result while other usable media can still be kept. Available previews and expected withheld or access-limited media produce warnings and remain retryable; cancellation is an error.
 
@@ -78,6 +78,8 @@ Flags:
       --create-archive         Create an archive index page linking all downloaded posts
       --download-files         Download file attachments locally and update content to reference local files
       --download-images        Download images locally and update content to reference local files
+      --audio-clips-dir string Directory name for downloaded audio clips (default "audio-clips")
+      --download-audio-clips   Download audio clips embedded in post text (MP3); separate from --download-podcasts, which gets a podcast post's episode
       --download-podcasts      Download podcast episode audio (MP3) for podcast posts
       --download-videos        Download Substack-hosted videos (MP4) of video posts and videos embedded in posts
   -d, --dry-run                Enable dry run
@@ -306,6 +308,20 @@ output/
 └── videos/
     ├── 20231201_120000_episode-title.mp4
     └── 20231201_120000_episode-title_video-550e8400-e29b-41d4-a716-446655440000.mp4
+```
+
+#### Downloading Audio Clips
+
+Posts can contain audio clips placed in the text, separate from a podcast post's episode. Substack leaves only a placeholder for each clip in the post HTML, so neither the post text nor `--download-podcasts` includes them. Use `--download-audio-clips` to download them as MP3 files.
+
+**Features:**
+- Saves clips as `{output}/audio-clips/{post-file-name}_audio-{clip-uuid}.mp3`; `--audio-clips-dir` changes the directory
+- Replaces each placeholder in HTML posts with a player of the local file, where the clip appears in the text. Markdown posts get a link to each clip instead
+- A post counts as complete only once all its clips are downloaded; failed clips are retried on the next run and downloaded clips are not fetched again
+- Shares the retry, resume, and paid-preview handling of podcasts and videos
+
+```bash
+sbstck-dl download --url https://example.substack.com --download-audio-clips
 ```
 
 #### Creating Archive Index Pages

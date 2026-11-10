@@ -33,6 +33,8 @@ var (
 	podcastsDir      string
 	downloadVideos   bool
 	videosDir        string
+	downloadClips    bool
+	audioClipsDir    string
 
 	downloadCmd = &cobra.Command{
 		Use:   "download",
@@ -60,6 +62,8 @@ func init() {
 	downloadCmd.Flags().StringVar(&podcastsDir, "podcasts-dir", "podcasts", "Directory name for downloaded podcast audio")
 	downloadCmd.Flags().BoolVar(&downloadVideos, "download-videos", false, "Download Substack-hosted videos (MP4) of video posts and videos embedded in posts")
 	downloadCmd.Flags().StringVar(&videosDir, "videos-dir", "videos", "Directory name for downloaded videos")
+	downloadCmd.Flags().BoolVar(&downloadClips, "download-audio-clips", false, "Download audio clips embedded in post text (MP3); separate from --download-podcasts, which gets a podcast post's episode")
+	downloadCmd.Flags().StringVar(&audioClipsDir, "audio-clips-dir", "audio-clips", "Directory name for downloaded audio clips")
 	downloadCmd.MarkFlagRequired("url")
 }
 
@@ -162,6 +166,9 @@ func downloadPostMedia(manifest *lib.MediaManifest, post lib.Post, postPath stri
 	if downloadVideos {
 		manifest.Record(post.Slug, lib.MediaVideos, false, nil)
 	}
+	if downloadClips {
+		manifest.Record(post.Slug, lib.MediaAudioClips, false, nil)
+	}
 	if saveErr := manifest.Save(); saveErr != nil {
 		return status, fmt.Errorf("save pending media for %s before download: %w", post.Slug, saveErr)
 	}
@@ -176,6 +183,12 @@ func downloadPostMedia(manifest *lib.MediaManifest, post lib.Post, postPath stri
 		complete, files, srcs, downloadErr := downloadPostVideos(post, postPath)
 		status.embedded.Videos = srcs
 		status.outcomes = append(status.outcomes, mediaOutcome{lib.MediaVideos, complete, files})
+		failures = append(failures, downloadErr)
+	}
+	if downloadClips {
+		complete, files, srcs, downloadErr := downloadPostAudioClips(post, postPath)
+		status.embedded.AudioClips = srcs
+		status.outcomes = append(status.outcomes, mediaOutcome{lib.MediaAudioClips, complete, files})
 		failures = append(failures, downloadErr)
 	}
 	// Persist pending output work before touching existing or new post files.
@@ -234,7 +247,8 @@ func completePostMedia(manifest *lib.MediaManifest, post lib.Post, status postMe
 // again because some requested media isn't complete yet.
 func postNeedsMedia(manifest *lib.MediaManifest, slug string) bool {
 	return (downloadPodcasts && !manifest.IsComplete(slug, lib.MediaPodcast)) ||
-		(downloadVideos && !manifest.IsComplete(slug, lib.MediaVideos))
+		(downloadVideos && !manifest.IsComplete(slug, lib.MediaVideos)) ||
+		(downloadClips && !manifest.IsComplete(slug, lib.MediaAudioClips))
 }
 
 // downloadPostPodcast downloads the post's podcast audio next to the post file.
@@ -303,6 +317,43 @@ func downloadPostVideos(post lib.Post, postPath string) (complete bool, files []
 				fmt.Printf("Video already downloaded: %s\n", video.LocalPath)
 			} else {
 				fmt.Printf("Downloaded video (%.1f MB) to %s\n", float64(video.Size)/1e6, video.LocalPath)
+			}
+		}
+	}
+	return complete, files, result.Sources(filepath.Dir(postPath)), errors.Join(failures...)
+}
+
+// downloadPostAudioClips downloads the audio clips in the post's text next to
+// the post file. The clip files share the post file's base name. It returns
+// whether there is nothing left to download, the downloaded files, and their
+// sources relative to the post file.
+func downloadPostAudioClips(post lib.Post, postPath string) (complete bool, files []string, srcs map[string]string, err error) {
+	baseName := strings.TrimSuffix(filepath.Base(postPath), filepath.Ext(postPath))
+	clipDownloader := lib.NewAudioClipDownloader(fetcher, filepath.Dir(postPath), audioClipsDir)
+	result, err := clipDownloader.DownloadAudioClips(ctx, post, baseName)
+	if err != nil {
+		return false, nil, nil, fmt.Errorf("download audio clips for %s: %w", post.Slug, err)
+	}
+
+	var failures []error
+	complete = true
+	for _, clip := range result.Clips {
+		switch {
+		case clip.Error != nil:
+			failures = append(failures, fmt.Errorf("download audio clip %s for %s: %w", clip.UploadID, post.Slug, clip.Error))
+			complete = false
+			continue
+		case clip.Preview:
+			log.Printf("Warning: only a preview of audio clip %s for post %s is available (paid clip); "+
+				"pass --cookie_name/--cookie_val of a paid subscription to download the full clip\n", clip.UploadID, post.Slug)
+			complete = false
+		}
+		files = append(files, clip.LocalPath)
+		if verbose {
+			if clip.Existed {
+				fmt.Printf("Audio clip already downloaded: %s\n", clip.LocalPath)
+			} else {
+				fmt.Printf("Downloaded audio clip (%.1f MB) to %s\n", float64(clip.Size)/1e6, clip.LocalPath)
 			}
 		}
 	}

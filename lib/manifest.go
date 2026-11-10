@@ -13,8 +13,9 @@ const MediaManifestFile = ".sbstck-dl-media.json"
 
 // Media kinds tracked in the manifest.
 const (
-	MediaPodcast = "podcast"
-	MediaVideos  = "videos"
+	MediaPodcast    = "podcast"
+	MediaVideos     = "videos"
+	MediaAudioClips = "audio_clips"
 )
 
 // MediaManifest records which posts' media downloads are complete, so that
