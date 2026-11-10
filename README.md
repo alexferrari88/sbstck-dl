@@ -83,7 +83,7 @@ Flags:
   -d, --dry-run                Enable dry run
       --file-extensions string Comma-separated list of file extensions to download (e.g., 'pdf,docx,txt'). If empty, downloads all file types
       --files-dir string       Directory name for downloaded file attachments (default "files")
-  -f, --format stringArray     Output formats: html, md, txt (comma-separated, space-separated, or repeated; default: html)
+  -f, --format stringArray     Output formats: html, md, txt, json (comma-separated, space-separated, or repeated; default: html)
   -h, --help                   help for download
       --image-quality string   Image quality to download (options: "high", "medium", "low") (default "high")
       --images-dir string      Directory name for downloaded images (default "images")
@@ -140,6 +140,12 @@ sbstck-dl download --url https://example.substack.com -f html -f md -f txt
 ```
 
 Selections are normalized and deduplicated in the requested order. Empty or unsupported formats and unexpected arguments fail before downloading. Each post and its requested images/attachments are processed once; HTML and Markdown share local media references. Text keeps its original plain-text content, and a text-only download does not download attachments.
+
+The `json` format saves each post's metadata as Substack served it: `post_date`, `title`, `subtitle`, `description`, `wordcount`, `audience`, `canonical_url`, `cover_image`, podcast and video details, and the original `body_html` (remote media URLs, not local copies). Requested with `--download-images` or `--download-files` on its own (`-f json`), it saves images and attachments as served, without rewriting the JSON. It gets no archive index, and is not changed by `--add-source-url`, since `canonical_url` already holds the source. To add metadata to an existing download, re-run the same bulk command with `json` added; only posts missing a `.json` file are fetched, and their media is not downloaded again.
+
+```bash
+sbstck-dl download --url https://example.substack.com -f html,md,txt,json
+```
 
 Bulk downloads fill missing formats while preserving complete local files. An explicit `/p/` post URL overwrites every selected format. With `--create-archive`, each selected format gets its own index and compact manifest; retained entries and localized covers are refreshed even when no new posts need downloading. A write or publication failure returns a nonzero status while allowing other selected formats to publish.
 

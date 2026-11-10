@@ -125,6 +125,8 @@ func (p *Post) contentForFormat(format string, withTitle bool) (string, error) {
 		return p.ToMD(withTitle)
 	case "txt":
 		return p.ToText(withTitle), nil
+	case "json":
+		return p.ToJSON()
 	default:
 		return "", fmt.Errorf("unknown format: %s", format)
 	}
@@ -151,7 +153,8 @@ func (p *Post) fileContent(format string, addSourceURL bool) (string, error) {
 		return "", err
 	}
 
-	if addSourceURL && p.CanonicalUrl != "" {
+	// JSON already carries canonical_url; appending text would make it invalid.
+	if addSourceURL && p.CanonicalUrl != "" && format != "json" {
 		sourceLine := fmt.Sprintf("\n\noriginal content: %s", p.CanonicalUrl) // Add separation
 
 		// Adjust formatting slightly for HTML

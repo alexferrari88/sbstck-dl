@@ -218,6 +218,17 @@ func TestPostWriteToFile(t *testing.T) {
 		})
 	}
 
+	t.Run("json", func(t *testing.T) {
+		post.CanonicalUrl = "https://example.substack.com/p/test-post"
+		filePath := filepath.Join(tempDir, "test.json")
+		require.NoError(t, post.WriteToFile(filePath, "json", true))
+		content, err := os.ReadFile(filePath)
+		require.NoError(t, err)
+		var saved Post
+		require.NoError(t, json.Unmarshal(content, &saved), "source URL must not be appended to JSON")
+		assert.Equal(t, post, saved)
+	})
+
 	// Test writing to a non-existent directory
 	t.Run("creating directory", func(t *testing.T) {
 		newDir := filepath.Join(tempDir, "subdir", "nested")
