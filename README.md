@@ -45,6 +45,7 @@ Flags:
       --before string            Download posts published before this date (format: YYYY-MM-DD)
       --cookie_name cookieName   Either substack.sid or connect.sid, based on your cookie (required for private newsletters)
       --cookie_val string        The substack.sid/connect.sid cookie value (required for private newsletters)
+      --media-rate int           Specify the rate of requests per second for images, attachments, podcasts, and videos (default: same as --rate)
   -h, --help                     help for sbstck-dl
   -x, --proxy string             Specify the proxy url
   -r, --rate int                 Specify the rate of requests per second (default 2)
@@ -83,7 +84,7 @@ Flags:
   -d, --dry-run                Enable dry run
       --file-extensions string Comma-separated list of file extensions to download (e.g., 'pdf,docx,txt'). If empty, downloads all file types
       --files-dir string       Directory name for downloaded file attachments (default "files")
-  -f, --format stringArray     Output formats: html, md, txt (comma-separated, space-separated, or repeated; default: html)
+  -f, --format stringArray     Output formats: html, md, txt, json (comma-separated, space-separated, or repeated; default: html)
   -h, --help                   help for download
       --image-quality string   Image quality to download (options: "high", "medium", "low") (default "high")
       --images-dir string      Directory name for downloaded images (default "images")
@@ -97,6 +98,7 @@ Global Flags:
       --before string   Download posts published before this date (format: YYYY-MM-DD)
       --cookie_name cookieName   Either substack.sid or connect.sid, based on your cookie (required for private newsletters)
       --cookie_val string        The substack.sid/connect.sid cookie value (required for private newsletters)
+      --media-rate int           Specify the rate of requests per second for images, attachments, podcasts, and videos (default: same as --rate)
   -x, --proxy string    Specify the proxy url
   -r, --rate int        Specify the rate of requests per second (default 2)
   -v, --verbose         Enable verbose output
@@ -140,6 +142,12 @@ sbstck-dl download --url https://example.substack.com -f html -f md -f txt
 ```
 
 Selections are normalized and deduplicated in the requested order. Empty or unsupported formats and unexpected arguments fail before downloading. Each post and its requested images/attachments are processed once; HTML and Markdown share local media references. Text keeps its original plain-text content, and a text-only download does not download attachments.
+
+The `json` format saves each post's metadata as Substack served it: `post_date`, `title`, `subtitle`, `description`, `wordcount`, `audience`, `canonical_url`, `cover_image`, podcast and video details, and the original `body_html` (remote media URLs, not local copies). Requested with `--download-images` or `--download-files` on its own (`-f json`), it saves images and attachments as served, without rewriting the JSON. It gets no archive index, and is not changed by `--add-source-url`, since `canonical_url` already holds the source. To add metadata to an existing download, re-run the same bulk command with `json` added; only posts missing a `.json` file are fetched, and their media is not downloaded again.
+
+```bash
+sbstck-dl download --url https://example.substack.com -f html,md,txt,json
+```
 
 Bulk downloads fill missing formats while preserving complete local files. An explicit `/p/` post URL overwrites every selected format. With `--create-archive`, each selected format gets its own index and compact manifest; retained entries and localized covers are refreshed even when no new posts need downloading. A write or publication failure returns a nonzero status while allowing other selected formats to publish.
 
@@ -192,6 +200,14 @@ output/
         ├── image1_1456x819.jpeg
         ├── image2_848x636.png
         └── image3_1272x720.webp
+```
+
+#### Media request rate
+
+Images, attachments, podcasts, and videos share the `--rate` limit with post pages by default, so image-heavy posts download slowly. Media is served by Substack's CDN, so `--media-rate` can raise its limit separately while post pages and the API keep `--rate`. A post's images download up to 10 at a time, so higher media rates are reachable; images that would save to the same filename still download in page order:
+
+```bash
+sbstck-dl download --url https://example.substack.com --download-images --media-rate 10
 ```
 
 #### Downloading File Attachments
@@ -347,7 +363,7 @@ Posts, archive indexes, and metadata files are published with temporary files an
 
 With `--create-archive --download-images`, HTML and Markdown archive covers use local assets. A matching successful body-image download is reused; otherwise the cover is downloaded into a source-specific `covers` subdirectory under the configured `--images-dir`. This prevents a cover from replacing an unrelated body image with the same filename. Nested image directories are supported, and index links stay relative to the archive folder.
 
-Downloaded HEIC/HEIF images get browser-compatible PNG previews automatically with `--download-images`, including body images and archive covers. The original downloaded bytes remain in place. HTML and Markdown reference PNGs in an adjacent `.sbstck-previews/<content-hash>/` folder; content hashes prevent newer failed downloads from reusing old previews. Keep that folder when copying the archive. Plain-text output still downloads requested images without embedding them. Images served as JPEG/PNG at HEIC URLs keep their existing behavior. File attachments are unaffected.
+Downloaded HEIC/HEIF images get browser-compatible PNG previews automatically with `--download-images`, including body images and archive covers. The original downloaded bytes remain in place. HTML and Markdown reference PNGs in an adjacent `.sbstck-previews/<content-hash>/` folder; content hashes prevent newer failed downloads from reusing old previews. Keep that folder when copying the archive. Plain-text output still downloads requested images without embedding them; without HTML, Markdown, or an archive index, no previews are made. Images served as JPEG/PNG at HEIC URLs keep their existing behavior. File attachments are unaffected.
 
 The bundled decoder needs no external converter, server, or native library. Preview conversion supports HEVC in HEIF and applies container orientation, produces an 8-bit PNG, and does not preserve original metadata or animations in the preview. It allows originals up to 64 MiB and primary images up to 50 megapixels, uses at most 512 MiB of WASM linear memory, and runs the decoder one image at a time with a 30-second deadline. PNG encoding and cache validation run outside that decoder deadline. Files beyond those limits, unsupported HEIF codecs, or conversion failures retain their originals and warn while using the remote image source. Previously published PNGs remain available to older posts. Future release builds include a companion `decoder-source.tar.gz` archive containing decoder source, build instructions, and licenses. Decoder source/build provenance and third-party licenses are in [internal/heicpreview/README.md](internal/heicpreview/README.md).
 
@@ -419,6 +435,7 @@ Global Flags:
       --before string   Download posts published before this date (format: YYYY-MM-DD)
       --cookie_name cookieName   Either substack.sid or connect.sid, based on your cookie (required for private newsletters)
       --cookie_val string        The substack.sid/connect.sid cookie value (required for private newsletters)
+      --media-rate int           Specify the rate of requests per second for images, attachments, podcasts, and videos (default: same as --rate)
   -x, --proxy string    Specify the proxy url
   -r, --rate int        Specify the rate of requests per second (default 2)
   -v, --verbose         Enable verbose output

@@ -205,3 +205,63 @@ func TestHEICCLI(t *testing.T) {
 		}
 	}
 }
+
+func TestHEICPreviewsOnlyWhenUsed(t *testing.T) {
+	binary := filepath.Join(t.TempDir(), "sbstck-dl")
+	if runtime.GOOS == "windows" {
+		binary += ".exe"
+	}
+	output, err := exec.Command("go", "build", "-o", binary, "..").CombinedOutput()
+	require.NoError(t, err, string(output))
+	data, err := os.ReadFile("../lib/testdata/preview.heic")
+	require.NoError(t, err)
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/photo.HEIC":
+			w.Write(data)
+		case "/p/fixture":
+			post := lib.Post{Slug: "fixture", Title: "Fixture", PostDate: "2026-01-01T12:00:00Z", BodyHTML: fmt.Sprintf(`<p>Fixture body</p><img src="%s/photo.HEIC" alt="photo">`, server.URL)}
+			payload, _ := json.Marshal(lib.PostWrapper{Post: post})
+			escaped, _ := json.Marshal(string(payload))
+			fmt.Fprintf(w, "<script>window._preloads = JSON.parse(%s)</script>", escaped)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	previews := func(dir string) []string {
+		var found []string
+		filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+			if err == nil && strings.Contains(path, ".sbstck-previews") && !d.IsDir() {
+				found = append(found, path)
+			}
+			return nil
+		})
+		return found
+	}
+	for _, tc := range []struct {
+		formats  string
+		previews bool
+		archive  bool
+	}{{"txt", false, false}, {"html", true, false}, {"md", true, false}, {"html,txt", true, false}, {"txt", true, true}} {
+		t.Run(fmt.Sprintf("%s/archive-%t", tc.formats, tc.archive), func(t *testing.T) {
+			dir := t.TempDir()
+			args := []string{"download", "--url", server.URL + "/p/fixture", "--format", tc.formats, "--output", dir, "--download-images", "--rate", "1000"}
+			if tc.archive {
+				args = append(args, "--create-archive")
+			}
+			out, err := exec.Command(binary, args...).CombinedOutput()
+			require.NoError(t, err, string(out))
+			original, err := os.ReadFile(filepath.Join(dir, "images", "fixture", "photo.HEIC"))
+			require.NoError(t, err)
+			require.Equal(t, data, original, "original kept as served")
+			if tc.previews {
+				require.NotEmpty(t, previews(dir))
+			} else {
+				require.Empty(t, previews(dir))
+				require.NotContains(t, string(out), "Warning")
+			}
+		})
+	}
+}

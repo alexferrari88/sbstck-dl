@@ -45,7 +45,7 @@ var (
 
 func init() {
 	downloadCmd.Flags().StringVarP(&downloadUrl, "url", "u", "", "Specify the Substack url")
-	downloadCmd.Flags().StringArrayVarP(&formatValues, "format", "f", nil, "Output formats: html, md, txt (comma-separated, space-separated, or repeated; default: html)")
+	downloadCmd.Flags().StringArrayVarP(&formatValues, "format", "f", nil, "Output formats: html, md, txt, json (comma-separated, space-separated, or repeated; default: html)")
 	downloadCmd.Flags().StringVarP(&outputFolder, "output", "o", ".", "Specify the download directory")
 	downloadCmd.Flags().BoolVarP(&dryRun, "dry-run", "d", false, "Enable dry run")
 	downloadCmd.Flags().BoolVar(&addSourceURL, "add-source-url", false, "Add the original post URL at the end of the downloaded file")
@@ -131,7 +131,7 @@ func writeDownloadedPost(post lib.Post, path string) (*lib.ImageDownloadResult, 
 	if fileExtensions != "" {
 		extensions = strings.Split(strings.ReplaceAll(fileExtensions, " ", ""), ",")
 	}
-	result, err := post.WriteToFileWithImages(ctx, path, format, addSourceURL, downloadImages, lib.ImageQuality(imageQuality), imagesDir, downloadFiles, extensions, filesDir, fetcher)
+	result, err := post.WriteToFileWithImages(ctx, path, format, addSourceURL, downloadImages, lib.ImageQuality(imageQuality), imagesDir, downloadFiles, extensions, filesDir, mediaFetcher)
 	if err == nil && verbose && result.Success > 0 {
 		fmt.Printf("Downloaded %d images (%d failed) for post %s\n", result.Success, result.Failed, post.Slug)
 	}
@@ -252,7 +252,7 @@ func downloadPostPodcast(post lib.Post, postPath string) (complete bool, files [
 	}
 
 	baseName := strings.TrimSuffix(filepath.Base(postPath), filepath.Ext(postPath))
-	podcastDownloader := lib.NewPodcastDownloader(fetcher, filepath.Dir(postPath), podcastsDir)
+	podcastDownloader := lib.NewPodcastDownloader(mediaFetcher, filepath.Dir(postPath), podcastsDir)
 	result, err := podcastDownloader.DownloadPodcast(ctx, post, baseName)
 	if err != nil {
 		return false, nil, "", fmt.Errorf("download podcast for %s: %w", post.Slug, err)
@@ -278,7 +278,7 @@ func downloadPostPodcast(post lib.Post, postPath string) (complete bool, files [
 // sources relative to the post file.
 func downloadPostVideos(post lib.Post, postPath string) (complete bool, files []string, srcs map[string]string, err error) {
 	baseName := strings.TrimSuffix(filepath.Base(postPath), filepath.Ext(postPath))
-	videoDownloader := lib.NewVideoDownloader(fetcher, filepath.Dir(postPath), videosDir)
+	videoDownloader := lib.NewVideoDownloader(mediaFetcher, filepath.Dir(postPath), videosDir)
 	result, err := videoDownloader.DownloadVideos(ctx, post, baseName)
 	if err != nil {
 		return false, nil, nil, fmt.Errorf("download videos for %s: %w", post.Slug, err)

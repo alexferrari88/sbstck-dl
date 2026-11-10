@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/PuerkitoBio/goquery"
 )
@@ -41,6 +42,9 @@ type ImageDownloader struct {
 	outputDir    string
 	imagesDir    string
 	imageQuality ImageQuality
+	// noPreviews keeps HEIC originals without browser previews, for outputs
+	// that never display local images.
+	noPreviews bool
 }
 
 // NewImageDownloader creates a new ImageDownloader instance
@@ -54,6 +58,12 @@ func NewImageDownloader(fetcher *Fetcher, outputDir, imagesDir string, quality I
 		imagesDir:    imagesDir,
 		imageQuality: quality,
 	}
+}
+
+// WithoutPreviews skips HEIC browser previews; originals are still saved.
+func (id *ImageDownloader) WithoutPreviews() *ImageDownloader {
+	id.noPreviews = true
+	return id
 }
 
 // ImageDownloadResult contains the results of downloading images for a post
@@ -101,15 +111,12 @@ func (id *ImageDownloader) DownloadImages(ctx context.Context, htmlContent strin
 		return nil, fmt.Errorf("failed to create images directory: %w", err)
 	}
 
-	// Download images and build URL mapping
-	var images []ImageInfo
+	images := id.downloadImageElements(ctx, imageElements, imagesPath)
+
+	// Build URL mapping in document order
 	urlToLocalPath := make(map[string]string)
-
-	for _, element := range imageElements {
-		// Download the best quality URL
-		imageInfo := id.downloadSingleImage(ctx, element.BestURL, imagesPath)
-		images = append(images, imageInfo)
-
+	for i, element := range imageElements {
+		imageInfo := images[i]
 		if imageInfo.Success {
 			// Map ALL URLs for this image element to the same local path
 			for _, url := range element.AllURLs {
@@ -138,6 +145,49 @@ func (id *ImageDownloader) DownloadImages(ctx context.Context, htmlContent strin
 		Success:     success,
 		Failed:      failed,
 	}, nil
+}
+
+// downloadImageElements downloads images concurrently, up to the fetcher's
+// worker limit; the fetcher's rate limiter still caps the request rate.
+// Images that share a local filename download one at a time in document
+// order, so the later image wins as it would sequentially. Results keep
+// document order.
+func (id *ImageDownloader) downloadImageElements(ctx context.Context, elements []ImageElement, imagesPath string) []ImageInfo {
+	images := make([]ImageInfo, len(elements))
+	var groups [][]int
+	groupByName := make(map[string]int)
+	for i, element := range elements {
+		filename, err := id.generateSafeFilename(element.BestURL)
+		if err != nil {
+			groups = append(groups, []int{i})
+			continue
+		}
+		if g, ok := groupByName[filename]; ok {
+			groups[g] = append(groups[g], i)
+			continue
+		}
+		groupByName[filename] = len(groups)
+		groups = append(groups, []int{i})
+	}
+	workers := id.fetcher.MaxWorkers
+	if workers < 1 {
+		workers = 1
+	}
+	slots := make(chan struct{}, workers)
+	var wg sync.WaitGroup
+	for _, group := range groups {
+		wg.Add(1)
+		slots <- struct{}{}
+		go func(group []int) {
+			defer wg.Done()
+			defer func() { <-slots }()
+			for _, i := range group {
+				images[i] = id.downloadSingleImage(ctx, elements[i].BestURL, imagesPath)
+			}
+		}(group)
+	}
+	wg.Wait()
+	return images
 }
 
 // extractImageElements extracts image elements with all their URLs from HTML content
