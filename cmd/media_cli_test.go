@@ -423,9 +423,7 @@ func (p *mediaCLIPublication) serve(w http.ResponseWriter, r *http.Request) {
 			http.NotFound(w, r)
 			return
 		}
-		preloads, _ := json.Marshal(map[string]any{"post": data})
-		quoted, _ := json.Marshal(string(preloads))
-		fmt.Fprintf(w, `<script>window._preloads = JSON.parse(%s)</script>`, quoted)
+		writeMediaCLIPost(w, data)
 	case strings.HasPrefix(r.URL.Path, "/api/v1/audio/upload/"):
 		http.Redirect(w, r, "/cdn/audio.mp3", http.StatusTemporaryRedirect)
 	case r.URL.Path == "/cdn/audio.mp3":
@@ -447,6 +445,12 @@ func (p *mediaCLIPublication) serve(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.NotFound(w, r)
 	}
+}
+
+func writeMediaCLIPost(w http.ResponseWriter, data map[string]any) {
+	preloads, _ := json.Marshal(map[string]any{"post": data})
+	quoted, _ := json.Marshal(string(preloads))
+	fmt.Fprintf(w, `<script>window._preloads = JSON.parse(%s)</script>`, quoted)
 }
 
 func (p *mediaCLIPublication) setFailure(path string) {

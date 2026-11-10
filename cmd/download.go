@@ -62,7 +62,7 @@ func init() {
 	downloadCmd.Flags().StringVar(&podcastsDir, "podcasts-dir", "podcasts", "Directory name for downloaded podcast audio")
 	downloadCmd.Flags().BoolVar(&downloadVideos, "download-videos", false, "Download Substack-hosted videos (MP4) of video posts and videos embedded in posts")
 	downloadCmd.Flags().StringVar(&videosDir, "videos-dir", "videos", "Directory name for downloaded videos")
-	downloadCmd.Flags().BoolVar(&downloadClips, "download-audio-clips", false, "Download audio clips embedded in post text (MP3); separate from --download-podcasts, which gets a podcast post's episode")
+	downloadCmd.Flags().BoolVar(&downloadClips, "download-audio-clips", false, "Download audio clips embedded in post text (MP3 or M4A)")
 	downloadCmd.Flags().StringVar(&audioClipsDir, "audio-clips-dir", "audio-clips", "Directory name for downloaded audio clips")
 	downloadCmd.MarkFlagRequired("url")
 }
@@ -156,7 +156,7 @@ type mediaOutcome struct {
 	files    []string
 }
 
-func downloadPostMedia(manifest *lib.MediaManifest, post lib.Post, postPath string) (status postMedia, err error) {
+func downloadPostMedia(manifest *lib.MediaManifest, post lib.Post, postPath string, clipOrigin *url.URL) (status postMedia, err error) {
 	// Invalidate byte-only completion before repairing a missing/empty cache.
 	// Otherwise a repaired file could make the old complete record look valid
 	// if pending publication or its manifest save subsequently fails.
@@ -186,7 +186,7 @@ func downloadPostMedia(manifest *lib.MediaManifest, post lib.Post, postPath stri
 		failures = append(failures, downloadErr)
 	}
 	if downloadClips {
-		complete, files, srcs, downloadErr := downloadPostAudioClips(post, postPath)
+		complete, files, srcs, downloadErr := downloadPostAudioClips(post, postPath, clipOrigin)
 		status.embedded.AudioClips = srcs
 		status.outcomes = append(status.outcomes, mediaOutcome{lib.MediaAudioClips, complete, files})
 		failures = append(failures, downloadErr)
@@ -327,10 +327,10 @@ func downloadPostVideos(post lib.Post, postPath string) (complete bool, files []
 // the post file. The clip files share the post file's base name. It returns
 // whether there is nothing left to download, the downloaded files, and their
 // sources relative to the post file.
-func downloadPostAudioClips(post lib.Post, postPath string) (complete bool, files []string, srcs map[string]string, err error) {
+func downloadPostAudioClips(post lib.Post, postPath string, clipOrigin *url.URL) (complete bool, files []string, srcs map[string]string, err error) {
 	baseName := strings.TrimSuffix(filepath.Base(postPath), filepath.Ext(postPath))
 	clipDownloader := lib.NewAudioClipDownloader(fetcher, filepath.Dir(postPath), audioClipsDir)
-	result, err := clipDownloader.DownloadAudioClips(ctx, post, baseName)
+	result, err := clipDownloader.DownloadAudioClips(ctx, post, baseName, clipOrigin)
 	if err != nil {
 		return false, nil, nil, fmt.Errorf("download audio clips for %s: %w", post.Slug, err)
 	}

@@ -3,14 +3,18 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/PuerkitoBio/goquery"
 	"github.com/alexferrari88/sbstck-dl/lib"
 	"github.com/stretchr/testify/require"
 )
@@ -81,6 +85,56 @@ func TestAudioClipsCLI(t *testing.T) {
 		require.Equal(t, 1, pub.count("/p/clips"))
 	})
 
+	t.Run("authenticates clips only at the selected publication", func(t *testing.T) {
+		const resolver = "/api/v1/audio/upload/clip-a/src"
+		const cookie = "substack.sid=synthetic-subscriber"
+		var cdnRequests, alternateRequests atomic.Int32
+		var cdnSawCookie, authenticated atomic.Bool
+		cdn := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			cdnRequests.Add(1)
+			if r.Header.Get("Cookie") != "" {
+				cdnSawCookie.Store(true)
+			}
+			w.Header().Set("Content-Type", "audio/mpeg")
+			fmt.Fprint(w, "audio bytes")
+		}))
+		defer cdn.Close()
+		alternate := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			alternateRequests.Add(1)
+			http.Redirect(w, r, cdn.URL+"/clip.mp3", http.StatusTemporaryRedirect)
+		}))
+		defer alternate.Close()
+		publication := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/p/clips":
+				writeMediaCLIPost(w, map[string]any{
+					"slug": "clips", "title": "Clips", "post_date": "2025-01-02T03:04:05Z",
+					"canonical_url": alternate.URL + "/p/clips", "body_html": audioClipEmbed("clip-a"),
+				})
+			case resolver:
+				if r.URL.RawQuery != "" || r.Header.Get("Cookie") != cookie {
+					w.WriteHeader(http.StatusForbidden)
+					return
+				}
+				authenticated.Store(true)
+				http.Redirect(w, r, cdn.URL+"/clip.mp3", http.StatusTemporaryRedirect)
+			default:
+				http.NotFound(w, r)
+			}
+		}))
+		defer publication.Close()
+
+		dir := t.TempDir()
+		out, err := run(t, publication.URL+"/p/clips?from=test#post", dir,
+			"--download-audio-clips", "--cookie_name", "substack.sid", "--cookie_val", "synthetic-subscriber")
+		require.NoError(t, err, out)
+		require.Zero(t, alternateRequests.Load(), "canonical metadata must never select the resolver")
+		require.True(t, authenticated.Load(), "the selected publication received the subscriber cookie")
+		require.EqualValues(t, 1, cdnRequests.Load())
+		require.False(t, cdnSawCookie.Load())
+		require.Equal(t, "audio bytes", read(t, clipPath(dir, "clip-a")))
+	})
+
 	t.Run("off by default and separate from podcasts", func(t *testing.T) {
 		pub := newMediaCLIPublication(t)
 		pub.add("clips", map[string]any{"body_html": body})
@@ -103,6 +157,107 @@ func TestAudioClipsCLI(t *testing.T) {
 		require.NoError(t, err, out)
 		require.Equal(t, "audio bytes", read(t, filepath.Join(dir, "assets", "my clips", stem+"clips_audio-clip-b.mp3")))
 		require.Contains(t, read(t, filepath.Join(dir, stem+"clips.html")), `src="assets/my%20clips/`+stem+`clips_audio-clip-b.mp3"`)
+		require.True(t, complete(t, dir, "clips"))
+	})
+
+	t.Run("backfills hidden clips in the edited saved excerpt", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, stem+"clips.html")
+		backup := path + ".saved"
+		var cdnRequests atomic.Int32
+		var interruptOutput atomic.Bool
+		pub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			origin := "http://" + r.Host
+			subscriber := r.Header.Get("Cookie") == "substack.sid=synthetic-subscriber"
+			switch r.URL.Path {
+			case "/sitemap.xml":
+				fmt.Fprintf(w, "<urlset><url><loc>%s/p/clips</loc></url></urlset>", origin)
+			case "/p/clips":
+				body := "<p>Public excerpt</p>"
+				if subscriber {
+					body += "<p>Subscriber text</p>" + audioClipEmbed("clip-b") + audioClipEmbed("clip-a")
+				}
+				writeMediaCLIPost(w, map[string]any{
+					"slug": "clips", "title": "Paid post", "post_date": "2025-01-02T03:04:05Z",
+					"canonical_url": origin + "/p/clips", "audience": "only_paid", "body_html": body,
+				})
+			case "/api/v1/audio/upload/clip-a/src", "/api/v1/audio/upload/clip-b/src":
+				if !subscriber {
+					w.WriteHeader(http.StatusForbidden)
+					return
+				}
+				http.Redirect(w, r, "/cdn/clip.mp3", http.StatusTemporaryRedirect)
+			case "/cdn/clip.mp3":
+				cdnRequests.Add(1)
+				if interruptOutput.CompareAndSwap(true, false) {
+					if err := os.Rename(path, backup); err != nil {
+						t.Errorf("temporarily move the inventoried HTML: %v", err)
+					}
+				}
+				w.Header().Set("Content-Type", "audio/mpeg")
+				fmt.Fprint(w, "audio bytes")
+			default:
+				http.NotFound(w, r)
+			}
+		}))
+		defer pub.Close()
+
+		out, err := run(t, pub.URL, dir, "--download-audio-clips")
+		require.NoError(t, err, out)
+		saved := read(t, path)
+		require.Contains(t, saved, "Public excerpt")
+		require.False(t, complete(t, dir, "clips"))
+		require.Zero(t, cdnRequests.Load())
+		const suffix = "</body></html>\n"
+		prefix := "<!doctype html><html><body>\n" + saved + "\n<P id='local-edit'>Keep this edit.</P>\n" +
+			"<!-- " + audioClipEmbed("clip-a") + " -->\n" +
+			`<script>const example = '<audio data-audio-clip-id="clip-b"></audio>';</script>` + "\n"
+		original := prefix + suffix
+		require.NoError(t, os.WriteFile(path, []byte(original), 0600))
+		require.NoError(t, os.Chmod(path, 0600))
+		info, err := os.Stat(path)
+		require.NoError(t, err)
+		mode := info.Mode().Perm()
+
+		flags := []string{"--download-audio-clips", "--cookie_name", "substack.sid", "--cookie_val", "synthetic-subscriber"}
+		interruptOutput.Store(true)
+		out, err = run(t, pub.URL, dir, flags...)
+		require.Error(t, err, out)
+		require.Contains(t, out, "existing HTML for clips disappeared")
+		require.Equal(t, original, read(t, backup))
+		for _, id := range []string{"clip-a", "clip-b"} {
+			require.Equal(t, "audio bytes", read(t, clipPath(dir, id)))
+		}
+		require.False(t, complete(t, dir, "clips"), "HTML publication must succeed before completion")
+		require.NoError(t, os.Rename(backup, path))
+
+		out, err = run(t, pub.URL, dir, flags...)
+		require.NoError(t, err, out)
+		post := read(t, path)
+		require.True(t, strings.HasPrefix(post, prefix), "preserve the excerpt, title, and local edit byte for byte")
+		require.True(t, strings.HasSuffix(post, suffix), "append the players inside the saved HTML body")
+		doc, err := goquery.NewDocumentFromReader(strings.NewReader(post))
+		require.NoError(t, err)
+		players := doc.Find("body audio[data-audio-clip-id]")
+		require.Equal(t, 2, players.Length())
+		for i, id := range []string{"clip-a", "clip-b"} {
+			player := players.Eq(i)
+			require.Equal(t, id, player.AttrOr("data-audio-clip-id", ""))
+			require.Equal(t, "audio-clips/"+filepath.Base(clipPath(dir, id)), player.AttrOr("src", ""))
+			require.Contains(t, player.Parent().Text(), "Audio clip")
+		}
+		require.NotContains(t, post, "Subscriber text")
+		info, err = os.Stat(path)
+		require.NoError(t, err)
+		require.Equal(t, mode, info.Mode().Perm())
+		require.True(t, complete(t, dir, "clips"))
+		require.EqualValues(t, 2, cdnRequests.Load(), "retry reuses both downloaded clips")
+
+		require.NoError(t, os.Remove(filepath.Join(dir, lib.MediaManifestFile)))
+		out, err = run(t, pub.URL, dir, flags...)
+		require.NoError(t, err, out)
+		require.Equal(t, post, read(t, path), "forced re-embedding leaves one player per ID")
+		require.EqualValues(t, 2, cdnRequests.Load())
 		require.True(t, complete(t, dir, "clips"))
 	})
 

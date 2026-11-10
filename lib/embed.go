@@ -25,24 +25,22 @@ type EmbeddedMedia struct {
 // HTML for native videos.
 var videoPlaceholderPattern = regexp.MustCompile(`<div\b[^>]*\bnative-video-embed\b[^>]*>\s*</div>`)
 
-// audioClipPlaceholderPattern matches the empty elements Substack leaves in
-// post HTML for audio clips.
-var audioClipPlaceholderPattern = regexp.MustCompile(`<div\b[^>]*\bnative-audio-embed\b[^>]*>\s*</div>`)
-
 // Embedded elements are matched so that embedding again updates them, e.g.
 // once the full file replaces a preview.
 var (
 	embeddedVideoPattern   = regexp.MustCompile(`(?s)<video\b[^>]*\bdata-upload-id="([A-Za-z0-9-]+)"[^>]*>.*?</video>`)
 	embeddedPodcastPattern = regexp.MustCompile(`(?s)<audio\b[^>]*\bdata-podcast\b[^>]*>.*?</audio>`)
-	embeddedClipPattern    = regexp.MustCompile(`(?s)<audio\b[^>]*\bdata-audio-clip-id="([A-Za-z0-9-]+)"[^>]*>.*?</audio>`)
 )
 
 // EmbedMedia embeds downloaded media in post HTML, as players of the local
 // files. Native video placeholders are replaced with their videos. The post's
 // own video, which usually has no placeholder, and the podcast audio are added
-// at the start. Only the media elements are changed, so the rest of the HTML
-// stays as it is.
+// at the start. Audio clips without a marker are appended to the body.
 func EmbedMedia(postHTML, postVideoID string, media EmbeddedMedia) string {
+	return embedAudioClips(embedPodcastAndVideos(postHTML, postVideoID, media), media.AudioClips)
+}
+
+func embedPodcastAndVideos(postHTML, postVideoID string, media EmbeddedMedia) string {
 	embedded := make(map[string]bool)
 	embed := func(match, uploadID string) string {
 		src, ok := media.Videos[uploadID]
@@ -58,20 +56,6 @@ func EmbedMedia(postHTML, postVideoID string, media EmbeddedMedia) string {
 	})
 	postHTML = videoPlaceholderPattern.ReplaceAllStringFunc(postHTML, func(match string) string {
 		return embed(match, placeholderUploadID(match))
-	})
-
-	// Audio clips are played where they appear in the text.
-	embedClip := func(match, uploadID string) string {
-		if src, ok := media.AudioClips[uploadID]; ok {
-			return audioClipElement(uploadID, src)
-		}
-		return match
-	}
-	postHTML = embeddedClipPattern.ReplaceAllStringFunc(postHTML, func(match string) string {
-		return embedClip(match, embeddedClipPattern.FindStringSubmatch(match)[1])
-	})
-	postHTML = audioClipPlaceholderPattern.ReplaceAllStringFunc(postHTML, func(match string) string {
-		return embedClip(match, placeholderUploadID(match))
 	})
 
 	if media.Podcast != "" {
@@ -171,7 +155,7 @@ func embedMediaInFileWith(path, postVideoID string, media EmbeddedMedia, publish
 		rest := strings.TrimLeft(content[i+len("</h1>"):], "\n")
 		title, content = content[:len(content)-len(rest)], rest
 	}
-	updated := title + EmbedMedia(content, postVideoID, media)
+	updated := embedAudioClips(title+embedPodcastAndVideos(content, postVideoID, media), media.AudioClips)
 	if updated == string(data) {
 		return nil
 	}

@@ -5,11 +5,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/PuerkitoBio/goquery"
+	"golang.org/x/net/html"
+	"golang.org/x/net/html/atom"
 )
 
 // AudioClipInfo describes the outcome of downloading a single audio clip.
@@ -55,6 +59,16 @@ type audioClipRef struct {
 	duration float64
 }
 
+type audioClipAttrs struct {
+	MediaUploadID string  `json:"mediaUploadId"`
+	Duration      float64 `json:"duration"`
+}
+
+func parseAudioClipAttrs(raw string) (attrs audioClipAttrs, valid bool) {
+	err := json.Unmarshal([]byte(raw), &attrs)
+	return attrs, err == nil && uploadIDPattern.MatchString(attrs.MediaUploadID)
+}
+
 // audioClipRefs lists the post's audio clips in document order. Clips are
 // named <baseName>_audio-<ID>, so their names stay the same if the post is
 // edited.
@@ -66,15 +80,9 @@ func (p *Post) audioClipRefs(baseName string) []audioClipRef {
 	}
 	seen := make(map[string]bool)
 	doc.Find(".native-audio-embed[data-attrs]").Each(func(i int, s *goquery.Selection) {
-		var attrs struct {
-			MediaUploadID string  `json:"mediaUploadId"`
-			Duration      float64 `json:"duration"`
-		}
-		if err := json.Unmarshal([]byte(s.AttrOr("data-attrs", "")), &attrs); err != nil {
-			return
-		}
+		attrs, valid := parseAudioClipAttrs(s.AttrOr("data-attrs", ""))
 		id := attrs.MediaUploadID
-		if !uploadIDPattern.MatchString(id) || seen[id] {
+		if !valid || seen[id] {
 			return
 		}
 		seen[id] = true
@@ -84,8 +92,10 @@ func (p *Post) audioClipRefs(baseName string) []audioClipRef {
 }
 
 // DownloadAudioClips downloads the post's audio clips to
-// <outputDir>/<clipsDir>/ as MP3 files named after baseName.
-func (ad *AudioClipDownloader) DownloadAudioClips(ctx context.Context, post Post, baseName string) (*AudioClipDownloadResult, error) {
+// <outputDir>/<clipsDir>/ as MP3 or M4A files named after baseName.
+// origin must identify the trusted publication that may receive the fetcher's
+// subscriber cookie.
+func (ad *AudioClipDownloader) DownloadAudioClips(ctx context.Context, post Post, baseName string, origin *url.URL) (*AudioClipDownloadResult, error) {
 	result := &AudioClipDownloadResult{Clips: []AudioClipInfo{}}
 
 	refs := post.audioClipRefs(baseName)
@@ -93,9 +103,8 @@ func (ad *AudioClipDownloader) DownloadAudioClips(ctx context.Context, post Post
 		return result, nil
 	}
 
-	origin, ok := publicationOrigin(post)
-	if !ok {
-		return nil, errors.New("post has no canonical URL to request audio clips from")
+	if origin == nil || origin.Hostname() == "" || (origin.Scheme != "http" && origin.Scheme != "https") {
+		return nil, errors.New("audio clips require a trusted HTTP(S) publication origin")
 	}
 
 	dir := filepath.Join(ad.outputDir, ad.clipsDir)
@@ -104,7 +113,12 @@ func (ad *AudioClipDownloader) DownloadAudioClips(ctx context.Context, post Post
 	}
 
 	for _, ref := range refs {
-		info := ad.downloadClip(ctx, origin.String()+"/api/v1/audio/upload/"+ref.uploadID+"/src", filepath.Join(dir, ref.name), ref.duration)
+		resolver := url.URL{
+			Scheme: origin.Scheme,
+			Host:   origin.Host,
+			Path:   "/api/v1/audio/upload/" + ref.uploadID + "/src",
+		}
+		info := ad.downloadClip(ctx, resolver.String(), filepath.Join(dir, ref.name), ref.duration)
 		info.UploadID = ref.uploadID
 		if info.Success {
 			result.Success++
@@ -151,4 +165,116 @@ func (r *AudioClipDownloadResult) Sources(dir string) map[string]string {
 		}
 	}
 	return srcs
+}
+
+// embedAudioClips uses token offsets to replace real elements while preserving
+// the original bytes around them, including examples in comments and scripts.
+func embedAudioClips(postHTML string, clips map[string]string) string {
+	if len(clips) == 0 {
+		return postHTML
+	}
+	tokens := html.NewTokenizer(strings.NewReader(postHTML))
+	placed := make(map[string]bool)
+	var output strings.Builder
+	var pos, last, start, depth, templateDepth int
+	var tag atom.Atom
+	var id string
+	bodyEnd := -1
+	for kind := tokens.Next(); kind != html.ErrorToken; kind = tokens.Next() {
+		offset := pos
+		pos += len(tokens.Raw())
+		if kind != html.StartTagToken && kind != html.EndTagToken {
+			continue
+		}
+		token := tokens.Token()
+		if token.DataAtom == atom.Template {
+			if kind == html.StartTagToken {
+				templateDepth++
+			} else if templateDepth > 0 {
+				templateDepth--
+			}
+			continue
+		}
+		if templateDepth > 0 {
+			continue
+		}
+		if depth > 0 {
+			if token.DataAtom == tag {
+				if kind == html.StartTagToken {
+					depth++
+				} else {
+					depth--
+				}
+				if depth == 0 {
+					output.WriteString(postHTML[last:start])
+					output.WriteString(audioClipElement(id, clips[id]))
+					placed[id] = true
+					last = pos
+				}
+			}
+			continue
+		}
+		if kind == html.EndTagToken {
+			if token.DataAtom == atom.Body && bodyEnd < 0 {
+				bodyEnd = output.Len() + offset - last
+			}
+			continue
+		}
+		id = audioClipElementID(token)
+		if _, ok := clips[id]; ok {
+			start, depth, tag = offset, 1, token.DataAtom
+		}
+	}
+
+	var missing []string
+	for id := range clips {
+		if !placed[id] {
+			missing = append(missing, id)
+		}
+	}
+	output.WriteString(postHTML[last:])
+	updated := output.String()
+	if len(missing) == 0 {
+		return updated
+	}
+
+	if bodyEnd < 0 {
+		bodyEnd = len(updated)
+	}
+	slices.Sort(missing)
+	var fallback strings.Builder
+	for _, id := range missing {
+		fallback.WriteString("\n<figure><figcaption>Audio clip</figcaption>")
+		fallback.WriteString(audioClipElement(id, clips[id]))
+		fallback.WriteString("</figure>\n")
+	}
+	return updated[:bodyEnd] + fallback.String() + updated[bodyEnd:]
+}
+
+func audioClipElementID(token html.Token) string {
+	switch token.DataAtom {
+	case atom.Audio:
+		for _, attr := range token.Attr {
+			if attr.Key == "data-audio-clip-id" {
+				return attr.Val
+			}
+		}
+	case atom.Div:
+		var native bool
+		var raw string
+		for _, attr := range token.Attr {
+			switch attr.Key {
+			case "class":
+				native = slices.Contains(strings.Fields(attr.Val), "native-audio-embed")
+			case "data-attrs":
+				raw = attr.Val
+			}
+		}
+		if native {
+			if attrs, valid := parseAudioClipAttrs(raw); valid {
+				return attrs.MediaUploadID
+			}
+		}
+	}
+	return ""
 }

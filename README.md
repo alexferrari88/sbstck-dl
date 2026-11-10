@@ -79,7 +79,7 @@ Flags:
       --download-files         Download file attachments locally and update content to reference local files
       --download-images        Download images locally and update content to reference local files
       --audio-clips-dir string Directory name for downloaded audio clips (default "audio-clips")
-      --download-audio-clips   Download audio clips embedded in post text (MP3); separate from --download-podcasts, which gets a podcast post's episode
+      --download-audio-clips   Download audio clips embedded in post text (MP3 or M4A)
       --download-podcasts      Download podcast episode audio (MP3) for podcast posts
       --download-videos        Download Substack-hosted videos (MP4) of video posts and videos embedded in posts
   -d, --dry-run                Enable dry run
@@ -312,13 +312,11 @@ output/
 
 #### Downloading Audio Clips
 
-Posts can contain audio clips placed in the text, separate from a podcast post's episode. Substack leaves only a placeholder for each clip in the post HTML, so neither the post text nor `--download-podcasts` includes them. Use `--download-audio-clips` to download them as MP3 files.
+Use `--download-audio-clips` for clips in the post text. Podcast episodes use `--download-podcasts`.
 
-**Features:**
-- Saves clips as `{output}/audio-clips/{post-file-name}_audio-{clip-uuid}.mp3`; `--audio-clips-dir` changes the directory
-- Replaces each placeholder in HTML posts with a player of the local file, where the clip appears in the text. Markdown posts get a link to each clip instead
-- A post counts as complete only once all its clips are downloaded; failed clips are retried on the next run and downloaded clips are not fetched again
-- Shares the retry, resume, and paid-preview handling of podcasts and videos
+- Saves clips as `{output}/audio-clips/{post-file-name}_audio-{clip-id}.mp3` or `.m4a`, depending on the source. Use `--audio-clips-dir` to choose another directory.
+- Replaces each clip marker in HTML with a local player. If an older saved post lacks the marker, it gets a labelled player at the end of the body and keeps its existing text and edits.
+- Adds clip links to newly written Markdown. Later runs retry failed clips and can replace paid previews with full downloads.
 
 ```bash
 sbstck-dl download --url https://example.substack.com --download-audio-clips
