@@ -312,7 +312,7 @@ output/
 
 #### Downloading Audio Clips
 
-Use `--download-audio-clips` for clips in the post text. Podcast episodes use `--download-podcasts`.
+Use `--download-audio-clips` for clips in the post text. Podcast episodes use `--download-podcasts`. With the clip flag, a direct post URL also updates any saved HTML in place and writes missing requested formats.
 
 - Saves clips as `{output}/audio-clips/{post-file-name}_audio-{clip-id}.mp3` or `.m4a`, depending on the source. Use `--audio-clips-dir` to choose another directory.
 - Replaces each clip marker in HTML with a local player. If an older saved post lacks the marker, it gets a labelled player at the end of the body and keeps its existing text and edits.

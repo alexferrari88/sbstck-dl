@@ -85,6 +85,23 @@ func TestAudioClipsCLI(t *testing.T) {
 		require.Equal(t, 1, pub.count("/p/clips"))
 	})
 
+	t.Run("only downloads playable native clip markers", func(t *testing.T) {
+		pub := newMediaCLIPublication(t)
+		template := "<template>" + audioClipEmbed("template-example") + "</template>"
+		span := `<span class="native-audio-embed" data-attrs='{"mediaUploadId":"span-example"}'></span>`
+		pub.add("clips", map[string]any{"body_html": template + span + audioClipEmbed("clip-a")})
+		dir := t.TempDir()
+		out, err := run(t, pub.URL, dir, "--download-audio-clips")
+		require.NoError(t, err, out)
+		require.Zero(t, pub.count("/api/v1/audio/upload/template-example/src"))
+		require.Zero(t, pub.count("/api/v1/audio/upload/span-example/src"))
+		require.Equal(t, 1, pub.count("/api/v1/audio/upload/clip-a/src"))
+		post := read(t, filepath.Join(dir, stem+"clips.html"))
+		require.Contains(t, post, template+span)
+		require.Equal(t, 1, strings.Count(post, "<audio "))
+		require.True(t, complete(t, dir, "clips"))
+	})
+
 	t.Run("authenticates clips only at the selected publication", func(t *testing.T) {
 		const resolver = "/api/v1/audio/upload/clip-a/src"
 		const cookie = "substack.sid=synthetic-subscriber"
@@ -259,6 +276,39 @@ func TestAudioClipsCLI(t *testing.T) {
 		require.Equal(t, post, read(t, path), "forced re-embedding leaves one player per ID")
 		require.EqualValues(t, 2, cdnRequests.Load())
 		require.True(t, complete(t, dir, "clips"))
+	})
+
+	t.Run("backfills an edited post selected by direct URL", func(t *testing.T) {
+		pub := newMediaCLIPublication(t)
+		pub.add("clips", map[string]any{"audience": "only_paid", "body_html": "<p>Public excerpt</p>"})
+		dir := t.TempDir()
+		url := pub.URL + "/p/clips"
+		out, err := run(t, url, dir)
+		require.NoError(t, err, out)
+		path := filepath.Join(dir, stem+"clips.html")
+		saved := read(t, path) + "\n<p>Keep this local edit.</p>"
+		require.NoError(t, os.WriteFile(path, []byte(saved), 0644))
+
+		pub.add("clips", map[string]any{"audience": "only_paid", "body_html": "<p>Subscriber text</p>" + audioClipEmbed("clip-a")})
+		flags := []string{"--download-audio-clips", "--cookie_name", "substack.sid", "--cookie_val", "synthetic-subscriber", "--format", "html,md"}
+		out, err = run(t, url, dir, flags...)
+		require.NoError(t, err, out)
+		post := read(t, path)
+		require.True(t, strings.HasPrefix(post, saved), "backfill must retain the saved excerpt and edit")
+		require.Equal(t, 1, strings.Count(post, `data-audio-clip-id="clip-a"`))
+		require.Contains(t, post, `src="audio-clips/`+stem+`clips_audio-clip-a.mp3"`)
+		require.Equal(t, "audio bytes", read(t, clipPath(dir, "clip-a")))
+		require.Contains(t, read(t, filepath.Join(dir, stem+"clips.md")), "[Download audio](audio-clips/"+stem+"clips_audio-clip-a.mp3)")
+		require.True(t, complete(t, dir, "clips"))
+
+		out, err = run(t, url, dir, flags...)
+		require.NoError(t, err, out)
+		require.Equal(t, post, read(t, path))
+		require.Equal(t, 3, pub.count("/p/clips"), "a direct URL still checks for newly visible clips")
+
+		out, err = run(t, url, dir)
+		require.NoError(t, err, out)
+		require.Contains(t, read(t, path), "Subscriber text", "a direct run without clips still refreshes the post")
 	})
 
 	t.Run("a failed clip keeps the post pending", func(t *testing.T) {

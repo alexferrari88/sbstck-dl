@@ -224,12 +224,15 @@ func runDownload(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("load media manifest: %w", err)
 		}
 	}
+	preserveExisting := !single || downloadClips
 	inventory := make(map[string]map[string]bool)
-	if !single {
+	if preserveExisting {
 		inventory, err = existingPostInventory(outputFolder)
 		if err != nil {
 			return fmt.Errorf("inspect existing posts: %w", err)
 		}
+	}
+	if !single {
 		var needed []string
 		for _, url := range urls {
 			complete := true
@@ -281,7 +284,7 @@ func runDownload(cmd *cobra.Command, args []string) error {
 		}
 		var missing []string
 		for _, selected := range formats {
-			if single || !inventory[post.Slug][selected] {
+			if !preserveExisting || !inventory[post.Slug][selected] {
 				missing = append(missing, selected)
 			}
 		}

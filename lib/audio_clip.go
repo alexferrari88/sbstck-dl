@@ -79,7 +79,10 @@ func (p *Post) audioClipRefs(baseName string) []audioClipRef {
 		return refs
 	}
 	seen := make(map[string]bool)
-	doc.Find(".native-audio-embed[data-attrs]").Each(func(i int, s *goquery.Selection) {
+	doc.Find("div.native-audio-embed[data-attrs]").Each(func(_ int, s *goquery.Selection) {
+		if s.Closest("template").Length() > 0 {
+			return
+		}
 		attrs, valid := parseAudioClipAttrs(s.AttrOr("data-attrs", ""))
 		id := attrs.MediaUploadID
 		if !valid || seen[id] {
