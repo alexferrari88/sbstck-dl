@@ -243,6 +243,33 @@ func completePostMedia(manifest *lib.MediaManifest, post lib.Post, status postMe
 	return nil
 }
 
+// invalidatePostAudioClips makes the clip players retryable before replacing
+// the saved HTML in a direct refresh.
+func invalidatePostAudioClips(manifest *lib.MediaManifest, slug string) error {
+	if manifest == nil {
+		var err error
+		manifest, err = lib.LoadMediaManifest(outputFolder)
+		if err != nil {
+			// A plain refresh does not depend on a readable media manifest.
+			return nil
+		}
+	}
+	record := manifest.Posts[slug]
+	if record == nil {
+		return nil
+	}
+	status := (*record)[lib.MediaAudioClips]
+	if status == nil || !status.Complete {
+		return nil
+	}
+	status.Complete = false
+	if err := manifest.Save(); err != nil {
+		status.Complete = true
+		return fmt.Errorf("save pending audio clips for %s: %w", slug, err)
+	}
+	return nil
+}
+
 // postNeedsMedia reports whether an already downloaded post must be fetched
 // again because some requested media isn't complete yet.
 func postNeedsMedia(manifest *lib.MediaManifest, slug string) bool {

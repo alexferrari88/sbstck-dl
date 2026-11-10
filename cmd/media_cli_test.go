@@ -238,6 +238,11 @@ func TestMediaCLI(t *testing.T) {
 			require.Error(t, err, out)
 			require.Equal(t, body, read(t, path))
 			require.Zero(t, pub.count("/cdn/audio.mp3"))
+
+			out, err = run(t, pub.URL+"/p/episode", dir)
+			require.NoError(t, err, out)
+			require.Contains(t, read(t, filepath.Join(dir, stem+"episode.html")), "body of episode")
+			require.Equal(t, body, read(t, path), "plain refresh leaves an unusable manifest untouched")
 		}
 	})
 	t.Run("manifest save failure preserves previous durable records", func(t *testing.T) {

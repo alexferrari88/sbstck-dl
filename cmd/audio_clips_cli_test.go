@@ -226,7 +226,9 @@ func TestAudioClipsCLI(t *testing.T) {
 		require.False(t, complete(t, dir, "clips"))
 		require.Zero(t, cdnRequests.Load())
 		const suffix = "</body></html>\n"
+		classLookalike := strings.Replace(audioClipEmbed("clip-a"), `class="native-audio-embed"`, `class="example&nbsp;native-audio-embed"`, 1)
 		prefix := "<!doctype html><html><body>\n" + saved + "\n<P id='local-edit'>Keep this edit.</P>\n" +
+			classLookalike + "\n" +
 			"<!-- " + audioClipEmbed("clip-a") + " -->\n" +
 			`<script>const example = '<audio data-audio-clip-id="clip-b"></audio>';</script>` + "\n"
 		original := prefix + suffix
@@ -285,6 +287,7 @@ func TestAudioClipsCLI(t *testing.T) {
 		url := pub.URL + "/p/clips"
 		out, err := run(t, url, dir)
 		require.NoError(t, err, out)
+		require.NoFileExists(t, filepath.Join(dir, lib.MediaManifestFile))
 		path := filepath.Join(dir, stem+"clips.html")
 		saved := read(t, path) + "\n<p>Keep this local edit.</p>"
 		require.NoError(t, os.WriteFile(path, []byte(saved), 0644))
@@ -306,9 +309,41 @@ func TestAudioClipsCLI(t *testing.T) {
 		require.Equal(t, post, read(t, path))
 		require.Equal(t, 3, pub.count("/p/clips"), "a direct URL still checks for newly visible clips")
 
+		out, err = run(t, url, dir, "--format", "md")
+		require.NoError(t, err, out)
+		require.True(t, complete(t, dir, "clips"), "refreshing only Markdown leaves HTML completion intact")
+
+		pub.add("clips", map[string]any{"audience": "only_paid", "body_html": "<p>Refreshed excerpt</p>"})
+		if runtime.GOOS != "windows" && os.Geteuid() != 0 {
+			t.Cleanup(func() { _ = os.Chmod(dir, 0755) })
+			require.NoError(t, os.Chmod(dir, 0555))
+			out, err = run(t, url, dir)
+			require.NoError(t, os.Chmod(dir, 0755))
+			require.Error(t, err, out)
+			require.Contains(t, out, "save pending audio clips for clips")
+			require.Equal(t, post, read(t, path), "failed manifest publication must keep the existing HTML")
+			require.True(t, complete(t, dir, "clips"))
+		}
 		out, err = run(t, url, dir)
 		require.NoError(t, err, out)
-		require.Contains(t, read(t, path), "Subscriber text", "a direct run without clips still refreshes the post")
+		refreshed := read(t, path)
+		require.Contains(t, refreshed, "Refreshed excerpt", "a direct run without clips still refreshes the post")
+		require.NotContains(t, refreshed, "data-audio-clip-id")
+		pending, err := lib.LoadMediaManifest(dir)
+		require.NoError(t, err)
+
+		pub.add("clips", map[string]any{"audience": "only_paid", "body_html": "<p>Subscriber text</p>" + audioClipEmbed("clip-a")})
+		out, err = run(t, pub.URL, dir, flags...)
+		require.NoError(t, err, out)
+		repaired := read(t, path)
+		require.True(t, strings.HasPrefix(repaired, refreshed), "bulk repair must retain the refreshed HTML")
+		require.Equal(t, 1, strings.Count(repaired, `data-audio-clip-id="clip-a"`))
+		require.Contains(t, repaired, `<figcaption>Audio clip</figcaption>`)
+		require.Contains(t, repaired, `src="audio-clips/`+stem+`clips_audio-clip-a.mp3"`)
+		require.False(t, pending.IsComplete("clips", lib.MediaAudioClips), "an HTML refresh makes existing clips pending")
+		require.Equal(t, []string{"audio-clips/" + filepath.Base(clipPath(dir, "clip-a"))}, (*pending.Posts["clips"])[lib.MediaAudioClips].Files)
+		require.Equal(t, 1, pub.count("/cdn/audio.mp3"), "bulk repair reuses the original download")
+		require.True(t, complete(t, dir, "clips"))
 	})
 
 	t.Run("a failed clip keeps the post pending", func(t *testing.T) {

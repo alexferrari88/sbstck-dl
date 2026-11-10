@@ -348,7 +348,13 @@ func runDownload(cmd *cobra.Command, args []string) error {
 			if selected == "txt" {
 				output = post
 			}
-			writeErr := output.WriteToFile(path, selected, addSourceURL)
+			var writeErr error
+			if single && selected == "html" && !downloadClips {
+				writeErr = invalidatePostAudioClips(manifest, post.Slug)
+			}
+			if writeErr == nil {
+				writeErr = output.WriteToFile(path, selected, addSourceURL)
+			}
 			writes = append(writes, lib.ArchivePostWrite{Format: selected, Path: path, DownloadTime: time.Now(), Err: writeErr})
 			if writeErr != nil {
 				outputsOK = false

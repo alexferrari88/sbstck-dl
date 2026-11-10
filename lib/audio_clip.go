@@ -268,7 +268,11 @@ func audioClipElementID(token html.Token) string {
 		for _, attr := range token.Attr {
 			switch attr.Key {
 			case "class":
-				native = slices.Contains(strings.Fields(attr.Val), "native-audio-embed")
+				// HTML class names are separated by ASCII whitespace.
+				classes := strings.FieldsFunc(attr.Val, func(r rune) bool {
+					return strings.ContainsRune(" \t\n\f\r", r)
+				})
+				native = slices.Contains(classes, "native-audio-embed")
 			case "data-attrs":
 				raw = attr.Val
 			}
